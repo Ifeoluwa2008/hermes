@@ -7,11 +7,11 @@ resolver = "2"
 members = [
   "crates/hermes-errors",
   "crates/hermes-codegen",
+  "crates/hermes-events",
   "contracts/*",
   "contracts/predictify-hybrid/fuzz",
   "contracts/disputes/fuzz",
   "contracts/resolution/fuzz",
-  "contracts/monitor/fuzz",
   "contracts/auction",
   "contracts/analytics",
 ]
