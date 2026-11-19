@@ -190,7 +190,7 @@ fn test_record_bet_increments_to_one() {
     let (_env, setup) = setup();
     let count = setup.client.record_bet(&setup.user1);
     assert_eq!(count, 1);
-    assert_eq!(setup.client.get_account_state(&setup.user1).bets, 1);
+    assert_eq!(setup.client.get_account_state(&setup.user1).unwrap().bets, 1);
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn test_record_bets_exactly_at_cap_then_rejects_next() {
         );
     }
     assert_eq!(
-        setup.client.get_account_state(&setup.user1).bets,
+        setup.client.get_account_state(&setup.user1).unwrap().bets,
         caps.max_bets
     );
 
@@ -403,8 +403,8 @@ fn test_counts_are_per_account() {
     setup.client.record_bet(&setup.user1);
     setup.client.record_bet(&setup.user2);
 
-    assert_eq!(setup.client.get_account_state(&setup.user1).bets, 2);
-    assert_eq!(setup.client.get_account_state(&setup.user2).bets, 1);
+    assert_eq!(setup.client.get_account_state(&setup.user1).unwrap().bets, 2);
+    assert_eq!(setup.client.get_account_state(&setup.user2).unwrap().bets, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -412,16 +412,45 @@ fn test_counts_are_per_account() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_get_account_state_all_zero_for_new_user() {
+fn test_get_account_state_returns_none_for_new_user() {
     let (_env, setup) = setup();
-    let state = setup.client.get_account_state(&setup.user1);
+    assert_eq!(setup.client.get_account_state(&setup.user1), None);
+}
+
+#[test]
+fn test_get_account_state_returns_some_after_first_record_bet() {
+    let (_env, setup) = setup();
+    setup.client.record_bet(&setup.user1);
+    assert!(setup.client.get_account_state(&setup.user1).is_some());
+}
+
+#[test]
+fn test_get_account_state_returns_some_after_first_record_position() {
+    let (_env, setup) = setup();
+    setup.client.record_position(&setup.user1);
+    assert!(setup.client.get_account_state(&setup.user1).is_some());
+}
+
+#[test]
+fn test_get_account_state_returns_some_after_first_record_subscription() {
+    let (_env, setup) = setup();
+    setup.client.record_subscription(&setup.user1);
+    assert!(setup.client.get_account_state(&setup.user1).is_some());
+}
+
+#[test]
+fn test_get_account_state_remains_some_after_all_decremented_to_zero() {
+    let (_env, setup) = setup();
+    setup.client.record_bet(&setup.user1);
+    setup.client.remove_bet(&setup.user1);
+    // Account is tracked even though every counter is back at zero.
     assert_eq!(
-        state,
-        AccountState {
+        setup.client.get_account_state(&setup.user1),
+        Some(AccountState {
             bets: 0,
             positions: 0,
             subscriptions: 0,
-        }
+        })
     );
 }
 
@@ -435,7 +464,7 @@ fn test_get_account_state_reflects_all_resource_types() {
     setup.client.record_subscription(&setup.user1);
     setup.client.record_subscription(&setup.user1);
 
-    let state = setup.client.get_account_state(&setup.user1);
+    let state = setup.client.get_account_state(&setup.user1).unwrap();
     assert_eq!(state.bets, 2);
     assert_eq!(state.positions, 1);
     assert_eq!(state.subscriptions, 3);
@@ -721,7 +750,7 @@ fn test_bets_cap_minus_one_succeeds() {
         setup.client.record_bet(&setup.user1);
     }
 
-    let state = setup.client.get_account_state(&setup.user1);
+    let state = setup.client.get_account_state(&setup.user1).unwrap();
     assert_eq!(state.bets, CAP - 1);
 }
 
@@ -776,7 +805,7 @@ fn test_positions_cap_minus_one_succeeds() {
         setup.client.record_position(&setup.user1);
     }
 
-    let state = setup.client.get_account_state(&setup.user1);
+    let state = setup.client.get_account_state(&setup.user1).unwrap();
     assert_eq!(state.positions, CAP - 1);
 }
 
@@ -832,7 +861,7 @@ fn test_subscriptions_cap_minus_one_succeeds() {
         setup.client.record_subscription(&setup.user1);
     }
 
-    let state = setup.client.get_account_state(&setup.user1);
+    let state = setup.client.get_account_state(&setup.user1).unwrap();
     assert_eq!(state.subscriptions, CAP - 1);
 }
 

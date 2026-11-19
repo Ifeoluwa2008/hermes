@@ -57,7 +57,7 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     Address, Env,
 };
-use monitor::{CapType, MonitorContract, MonitorContractClient, MonitorError};
+use monitor::{AccountState, CapType, MonitorContract, MonitorContractClient, MonitorError};
 
 // ---------------------------------------------------------------------------
 // Number of distinct user addresses available to the fuzzer.
@@ -104,7 +104,17 @@ fn assert_invariants(client: &MonitorContractClient, users: &[Address]) {
     let caps = client.get_caps();
 
     for user in users {
-        let state = client.get_account_state(user);
+        // An account that has never had a successful record_* call has no
+        // persistent state. get_account_state returns None in that case;
+        // treat it as all-zero counters, which trivially satisfies both
+        // invariants.
+        let state = client
+            .get_account_state(user)
+            .unwrap_or(AccountState {
+                bets: 0,
+                positions: 0,
+                subscriptions: 0,
+            });
 
         assert!(
             state.bets <= caps.max_bets,
