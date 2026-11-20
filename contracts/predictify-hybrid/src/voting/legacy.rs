@@ -8,7 +8,7 @@
 //!
 //! ### Known Limitation
 //! If TIERED payout curves are implemented in the future, there is a critical validation
-//! gap: the `validate_payout_curve` function does NOT verify that `runner_up_outcome` 
+//! gap: the `validate_payout_curve` function does NOT verify that `runner_up_outcome`
 //! differs from `winning_outcome` at the time of market resolution.
 //!
 //! ### Impact
@@ -443,10 +443,10 @@ impl VotingManager {
     /// Process winnings claim for a user
     ///
     /// # TIERED Payout Curve Validation (Future Feature)
-    /// 
-    /// **CRITICAL LIMITATION**: This function does not currently validate that 
+    ///
+    /// **CRITICAL LIMITATION**: This function does not currently validate that
     /// `runner_up_outcome != winning_outcome` for TIERED payout curves. If such curves
-    /// are implemented in the future, this validation MUST be added before payout 
+    /// are implemented in the future, this validation MUST be added before payout
     /// calculation to prevent double-counting errors.
     ///
     /// **Issue**: If `runner_up_outcome == winning_outcome` at resolution time:
@@ -1785,7 +1785,7 @@ mod tiered_payout_tests {
     #[test]
     fn test_tiered_payout_double_counting_issue() {
         let env = Env::default();
-        
+
         // Create a test market with binary outcomes
         let mut market = Market::new(
             &env,
@@ -1830,7 +1830,7 @@ mod tiered_payout_tests {
         // Scenario: If TIERED curve has runner_up = "yes" (same as winning outcome)
         // The payout calculation would be incorrect.
         // With proper validation/fallback, this should be caught and handled.
-        
+
         // Calculate payout for a "yes" voter (2M of 7M winning stake)
         let user_yes_1_stake = 4_000_000;
         let total_winning = 7_000_000;  // Total "yes" votes
@@ -1848,7 +1848,7 @@ mod tiered_payout_tests {
         // Expected: (4_000_000 * 98 / 100) * 10_000_000 / 7_000_000 = 5,600,000
         let expected_payout = (user_yes_1_stake * 98 / 100) * market.total_staked / total_winning;
         assert_eq!(payout, expected_payout);
-        
+
         // Verify that payout stays within reasonable bounds
         // Total winning pool (98% after fee) is 6,860,000
         // "yes" voters share this: 6,860,000
@@ -1921,7 +1921,7 @@ mod tiered_payout_tests {
             market.total_staked,
             200,
         ).expect_err("Loser should get 0");
-        
+
         // Actually the function returns Ok(0) for non-winning outcomes due to voting logic
         // Let's verify the logic: user not in winning_outcomes gets 0
         // This is enforced at claim validation level, not in calculate_payout
@@ -1936,24 +1936,24 @@ mod tiered_payout_tests {
     fn test_process_claim_has_validation_checkpoint() {
         // This test verifies that the documentation is in place
         // The actual validation will be implemented when TIERED curves are added
-        
+
         // The key insertion point is in VotingManager::process_claim, after:
         // 1. Market is validated for claim eligibility
         // 2. Before: Payout is calculated
-        
+
         // Code structure should be:
         // ```
         // let mut market = MarketStateManager::get_market(...)?;
         // VotingValidator::validate_market_for_claim(...)?;
-        // 
+        //
         // // FUTURE: Add TIERED validation here
         // // if is_tiered_curve(&market) && curve.runner_up_outcome == market.get_winning_outcome() {
         // //     apply_winner_takes_all_fallback(...)?;
         // // }
-        // 
+        //
         // let payout = VotingUtils::calculate_user_payout(...)?;
         // ```
-        
+
         // This test simply documents the intended behavior
         let env = Env::default();
         let market = Market::new(
@@ -1980,7 +1980,7 @@ mod tiered_payout_tests {
 
         // Verify market structure supports getting winning outcomes
         assert_eq!(market.winning_outcomes, None);  // Not resolved yet
-        
+
         // After resolution, this would be populated
         // market.winning_outcomes = Some(vec!["yes"]);
         // Then we can check: market.get_winning_outcome()
