@@ -11,6 +11,7 @@ members = [
   "contracts/predictify-hybrid/fuzz",
   "contracts/disputes/fuzz",
   "contracts/resolution/fuzz",
+  "contracts/monitor/fuzz",
   "contracts/auction",
   "contracts/analytics",
 ]
@@ -35,6 +36,5 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
-
 
 

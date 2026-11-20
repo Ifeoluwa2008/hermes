@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Map, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, Map, Symbol};
 
 mod errors;
 pub use errors::ContractError;
@@ -102,6 +102,8 @@ enum DataKey {
 
 /// Default timelock cooldown in seconds for fee updates (24 hours).
 const DEFAULT_TIMELOCK_SECONDS: u64 = 86_400;
+/// Minimum timelock cooldown in seconds for fee updates (1 hour).
+const MIN_TIMELOCK_SECONDS: u64 = 3_600;
 
 /// Maximum platform fee percentage in basis points (100% = 10_000).
 const MAX_FEE_PERCENTAGE: i128 = 10_000;
@@ -195,7 +197,7 @@ impl FeesContract {
             platform_fee_percentage: 200, // 2.00%
             creation_fee: 0,
             min_fee_amount: 1,
-            max_fee_amount: 1_000_000_000_000, // 1M XLM in stroops
+            max_fee_amount: MAX_FEE_AMOUNT, // hard protocol cap: 10,000 XLM
             collection_threshold: 100_000_000, // 100 XLM
             fees_enabled: true,
         };
@@ -274,6 +276,7 @@ impl FeesContract {
     /// - `ContractError::Unauthorized` if caller is not the admin.
     /// - `ContractError::FeePercentageTooHigh` if platform_fee_percentage > 10_000.
     /// - `ContractError::InvalidInput` if any fee value is negative.
+    /// - `ContractError::NoPendingFeeCommit` if no commitment exists.
     pub fn update_fee_config(
         env: Env,
         admin: Address,
@@ -310,12 +313,14 @@ impl FeesContract {
             .persistent()
             .set(&Symbol::new(&env, FEE_QUEUED_KEY), &queued);
 
-        // Consume active commit if present
-        env.storage()
-            .persistent()
-            .remove(&Symbol::new(&env, FEE_COMMIT_KEY));
+        // Verify the revealed config matches the committed hash.
+        let config_bytes = new_config.to_xdr(&env);
+        let config_hash = env.crypto().sha256(&config_bytes);
+        if config_hash != commit.hash {
+            return Err(ContractError::CommitHashMismatch);
+        }
 
-        Ok(())
+        Self::queue_fee_config(&env, &admin, new_config, DEFAULT_TIMELOCK_SECONDS)
     }
 
     /// Applies a previously queued fee configuration update after its timelock has expired.
@@ -373,6 +378,7 @@ impl FeesContract {
     /// Sets only the platform fee percentage.
     ///
     /// Convenience entrypoint that preserves all other fee configuration values.
+    /// The update is queued and subject to the standard fee configuration timelock.
     ///
     /// # Authorization
     /// The `admin` caller must authenticate via `require_auth()` and be the
@@ -396,11 +402,7 @@ impl FeesContract {
 
         let mut config = Self::get_fee_config_internal(&env)?;
         config.platform_fee_percentage = fee_percentage;
-        env.storage()
-            .persistent()
-            .set(&Symbol::new(&env, FEE_CONFIG_KEY), &config);
-
-        Ok(())
+        Self::queue_fee_config(&env, &admin, config, DEFAULT_TIMELOCK_SECONDS)
     }
 
     /// Authorizes a contract to record fees.
@@ -490,6 +492,13 @@ impl FeesContract {
 
         Self::assert_fees_not_paused(&env)?;
 
+        // Enforce withdrawal cooldown: reject if called before next_withdrawal.
+        let now = env.ledger().timestamp();
+        let schedule_check = Self::get_withdrawal_schedule_internal(&env);
+        if schedule_check.last_withdrawal > 0 && now < schedule_check.next_withdrawal {
+            return Err(ContractError::WithdrawalCooldownActive);
+        }
+
         let collected: i128 = env
             .storage()
             .persistent()
@@ -499,11 +508,6 @@ impl FeesContract {
         let config = Self::get_fee_config_internal(&env)?;
 
         if collected < config.collection_threshold {
-            let mut schedule = Self::get_withdrawal_schedule_internal(&env);
-            schedule.status = FeeWithdrawalStatus::Failed;
-            env.storage()
-                .persistent()
-                .set(&Symbol::new(&env, WITHDRAWAL_SCHEDULE_KEY), &schedule);
             return Err(ContractError::BelowCollectionThreshold);
         }
 
@@ -513,7 +517,6 @@ impl FeesContract {
             .set(&Symbol::new(&env, COLLECTED_FEES_KEY), &0i128);
 
         // Update withdrawal schedule
-        let now = env.ledger().timestamp();
         let mut schedule = Self::get_withdrawal_schedule_internal(&env);
         schedule.last_withdrawal = now;
         schedule.next_withdrawal = now
@@ -730,6 +733,34 @@ impl FeesContract {
             .get(&Symbol::new(env, FEE_QUEUED_KEY))
     }
 
+    fn queue_fee_config(
+        env: &Env,
+        admin: &Address,
+        config: FeeConfig,
+        delay_seconds: u64,
+    ) -> Result<(), ContractError> {
+        if delay_seconds < MIN_TIMELOCK_SECONDS {
+            return Err(ContractError::InvalidInput);
+        }
+
+        let now = env.ledger().timestamp();
+        let queued = PendingFeeConfig {
+            config,
+            admin: admin.clone(),
+            proposed_at: now,
+            apply_eta: now.saturating_add(delay_seconds),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&Symbol::new(env, FEE_QUEUED_KEY), &queued);
+        env.storage()
+            .persistent()
+            .remove(&Symbol::new(env, FEE_COMMIT_KEY));
+
+        Ok(())
+    }
+
     /// Validates the caller is the registered admin.
     fn assert_is_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
         let stored_admin = Self::get_admin_internal(env)?;
@@ -794,7 +825,16 @@ impl FeesContract {
         {
             return Err(ContractError::InvalidInput);
         }
+        // Protocol invariant: max_fee_amount must never exceed the hard cap
+        // (MAX_FEE_AMOUNT = 10,000 XLM) regardless of who is calling.
+        // This prevents a compromised admin from draining users via sky-high fees.
+        if config.max_fee_amount > MAX_FEE_AMOUNT {
+            return Err(ContractError::InvalidInput);
+        }
         if config.min_fee_amount > config.max_fee_amount {
+            return Err(ContractError::InvalidInput);
+        }
+        if config.fees_enabled && config.min_fee_amount == 0 {
             return Err(ContractError::InvalidInput);
         }
         Ok(())

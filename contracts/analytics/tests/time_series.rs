@@ -83,6 +83,24 @@ fn test_pause_and_unpause() {
 }
 
 #[test]
+fn test_record_metric_at_rejects_timestamp_outside_ledger_drift() {
+    let (env, client, _admin) = setup_env();
+    env.ledger().set_timestamp(100_000);
+    let metric = symbol_short!("future");
+    let timestamp = env.ledger().timestamp() + 86_401;
+    let stale_timestamp = env.ledger().timestamp() - 86_401;
+
+    assert_eq!(
+        client.try_record_metric_at(&metric, &timestamp, &100),
+        Err(Ok(ContractError::ValueOutOfRange))
+    );
+    assert_eq!(
+        client.try_record_metric_at(&metric, &stale_timestamp, &100),
+        Err(Ok(ContractError::ValueOutOfRange))
+    );
+}
+
+#[test]
 fn test_time_bucketed_aggregation() {
     let (env, client, _admin) = setup_env();
     let metric = symbol_short!("price");
@@ -233,6 +251,7 @@ fn test_capacity_limits() {
         client.try_record_metric_at(&metric, &40, &400),
         Err(Ok(ContractError::StoreFull))
     );
+    assert_eq!(client.get_metric_summary(&metric).total_count, 3);
 }
 
 #[test]

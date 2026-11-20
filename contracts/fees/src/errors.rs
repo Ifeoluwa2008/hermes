@@ -29,6 +29,10 @@ pub enum ContractError {
     FeeRevealTooEarly = 11,
     /// Fee config apply was attempted before the timelock expired.
     FeeApplyTooEarly = 12,
+    /// The revealed fee config does not match the committed hash.
+    CommitHashMismatch = 13,
+    /// Fee withdrawal attempted before the cooldown period has elapsed.
+    WithdrawalCooldownActive = 14,
 }
 
 #[cfg(test)]

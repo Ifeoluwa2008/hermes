@@ -10,9 +10,34 @@ use soroban_sdk::{contracterror, contracttype, Address, Env, Map, String, Symbol
 ///
 /// Each discriminant is part of the client-facing contract API. Clients may
 /// persist these numbers or use them to decode failed invocations, so existing
-/// values must not be renumbered or reused. Add new variants with an explicit,
-/// previously unused value and update `tests/err_stability.rs` in the same
-/// change. A deliberate breaking change requires a versioned migration plan.
+/// values must not be renumbered or reused. A deliberate breaking change
+/// requires a versioned migration plan.
+///
+/// # Deprecation and pruning policy
+///
+/// This catalog is intentionally bounded. The following rules apply to every
+/// change that touches this enum:
+///
+/// 1. **Reachability required.** A variant may only be added if it is returned
+///    from at least one production entrypoint (or a function transitively
+///    called by one). Speculative or "reserved for future use" codes are not
+///    accepted.
+/// 2. **Explicit, unused codes only.** New variants must declare an explicit
+///    numeric discriminant that has never been used before. Codes are never
+///    renumbered and never reused, even after the variant that owned them is
+///    removed.
+/// 3. **Same-change documentation.** Adding or removing a variant requires
+///    updating `tests/err_stability.rs` (the pinned code table) and
+///    `docs/errors/predictify-hybrid.md` in the *same* change. A PR that
+///    touches this enum without those updates is rejected.
+/// 4. **Deprecate, then prune.** When a variant becomes unreachable (its last
+///    call site is deleted or refactored away), it is first marked
+///    `#[deprecated]` with a note pointing at the replacement. It stays in the
+///    enum for exactly one release cycle so downstream SDKs can migrate, and is
+///    then removed. Removal never renumbers the surviving variants.
+/// 5. **Audit cadence.** The catalog is re-audited against `src/` usages at
+///    least once per release cycle; the audit result is recorded in the
+///    changelog for that release.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -24,6 +49,9 @@ pub enum Error {
     InvalidCap = 674,
     /// The cool-off period is still active. Cannot unpause/resume the market.
     CoolOffPeriodActive = 675,
+    /// Delegation cap exceeded: a single address cannot hold more than 10 % of
+    /// total voting power through delegation.
+    DelegationCapExceeded = 676,
     // ===== USER OPERATION ERRORS (100-112) =====
     /// User is not authorized to perform the requested action. Typically returned when
     /// a non-admin attempts to call admin-only functions.
@@ -905,21 +933,6 @@ impl ErrorHandler {
             Error::BetCoolOffActive => RecoveryStrategy::RetryWithDelay,
             Error::BetCancellationWindowClosed => RecoveryStrategy::NoRecovery,
             Error::OperationWouldExceedBudget => RecoveryStrategy::NoRecovery,
-            // Limit errors driven by caller input: retrying with a smaller value works.
-            Error::BetAboveMaximum | Error::BatchEmpty | Error::BatchSizeExceeded => {
-                RecoveryStrategy::Retry
-            }
-            // Limit errors driven by admin configuration: an operator must fix the config.
-            Error::BetLimitsInverted
-            | Error::BetLimitAboveMaximum
-            | Error::BetCapOutOfRange
-            | Error::FeePercentageOutOfRange
-            | Error::FeeAmountAboveMaximum
-            | Error::CreationFeeOutOfRange
-            | Error::FeeLimitsInverted
-            | Error::QueueCapacityOutOfRange => RecoveryStrategy::Abort,
-            // Re-initialization is a benign no-op for the caller.
-            Error::QueueAlreadyInitialized => RecoveryStrategy::Skip,
             _ => RecoveryStrategy::Abort,
         }
     }
@@ -1513,11 +1526,6 @@ impl ErrorHandler {
                 ErrorCategory::Financial,
                 RecoveryStrategy::NoRecovery,
             ),
-            Error::BetBelowMarketMin => (
-                ErrorSeverity::Low,
-                ErrorCategory::Financial,
-                RecoveryStrategy::NoRecovery,
-            ),
             Error::BetCancellationWindowClosed => (
                 ErrorSeverity::Low,
                 ErrorCategory::UserOperation,
@@ -1527,35 +1535,6 @@ impl ErrorHandler {
                 ErrorSeverity::Critical,
                 ErrorCategory::System,
                 RecoveryStrategy::NoRecovery,
-            ),
-            // ===== Limit errors (600-611) =====
-            // Caller-supplied value out of bounds — the caller can resubmit a smaller value.
-            Error::BetAboveMaximum | Error::BatchEmpty | Error::BatchSizeExceeded => (
-                ErrorSeverity::Low,
-                ErrorCategory::Validation,
-                RecoveryStrategy::Retry,
-            ),
-            // Admin-supplied bound is itself invalid — the configuration must be corrected.
-            Error::BetLimitsInverted
-            | Error::BetLimitAboveMaximum
-            | Error::BetCapOutOfRange
-            | Error::QueueCapacityOutOfRange => (
-                ErrorSeverity::Medium,
-                ErrorCategory::Validation,
-                RecoveryStrategy::Abort,
-            ),
-            Error::FeePercentageOutOfRange
-            | Error::FeeAmountAboveMaximum
-            | Error::CreationFeeOutOfRange
-            | Error::FeeLimitsInverted => (
-                ErrorSeverity::Medium,
-                ErrorCategory::Financial,
-                RecoveryStrategy::Abort,
-            ),
-            Error::QueueAlreadyInitialized => (
-                ErrorSeverity::Low,
-                ErrorCategory::System,
-                RecoveryStrategy::Skip,
             ),
             _ => (
                 ErrorSeverity::Medium,
@@ -1698,7 +1677,6 @@ impl Error {
             Error::AdminNotSet => "Admin address not set",
             Error::FeeExceedsMax => "Fee is above the acceptable threshold",
             Error::BetExceedsCap => "Bet amount exceeds the per-market maximum bet cap",
-            Error::BetBelowMarketMin => "Bet amount is below the per-market minimum threshold",
             Error::OracleStale => "Oracle data is stale",
             Error::OracleNoConsensus => "Oracle consensus not reached",
             Error::OracleVerified => "Oracle result already verified",
@@ -1819,7 +1797,6 @@ impl Error {
             Error::AdminNotSet => "ADMIN_NOT_SET",
             Error::FeeExceedsMax => "FEE_ABOVE_ACCEPTABLE",
             Error::BetExceedsCap => "BET_EXCEEDS_CAP",
-            Error::BetBelowMarketMin => "BET_BELOW_MARKET_MIN",
             Error::OracleStale => "ORACLE_STALE",
             Error::OracleNoConsensus => "ORACLE_NO_CONSENSUS",
             Error::OracleVerified => "ORACLE_VERIFIED",
