@@ -254,6 +254,66 @@ fn test_capacity_limits() {
     assert_eq!(client.get_metric_summary(&metric).total_count, 3);
 }
 
+/// The `StoreFull` guard fires **before** any storage write.
+///
+/// Specifically, when the store is at exactly `max_capacity`:
+/// - The rejected call returns `StoreFull`.
+/// - `total_count` in the summary remains at `max_capacity` (not `max_capacity + 1`).
+/// - The raw data-point list also remains at `max_capacity` entries.
+/// - A subsequent call with a *different* timestamp still returns `StoreFull`,
+///   confirming the store is not in a partially-written inconsistent state.
+#[test]
+fn test_store_full_check_runs_before_write() {
+    let (env, client, admin) = setup_env();
+    let metric = symbol_short!("snap");
+
+    // Fill to capacity = 2 exactly.
+    client.set_capacity(&admin, &2);
+    assert_eq!(client.record_metric_at(&metric, &10, &1000), 10);
+    assert_eq!(client.record_metric_at(&metric, &20, &2000), 20);
+
+    // Store is now at capacity; summary must reflect exactly 2 points.
+    let summary_before = client.get_metric_summary(&metric);
+    assert_eq!(summary_before.total_count, 2);
+
+    // The 3rd call must return StoreFull without writing anything.
+    assert_eq!(
+        client.try_record_metric_at(&metric, &30, &3000),
+        Err(Ok(ContractError::StoreFull))
+    );
+
+    // summary.total_count must still be 2 — no partial write occurred.
+    let summary_after = client.get_metric_summary(&metric);
+    assert_eq!(
+        summary_after.total_count, 2,
+        "StoreFull must not increment total_count"
+    );
+    assert_eq!(
+        summary_after.total_sum, summary_before.total_sum,
+        "StoreFull must not modify total_sum"
+    );
+    assert_eq!(
+        summary_after.latest_value, summary_before.latest_value,
+        "StoreFull must not modify latest_value"
+    );
+
+    // The raw points list must also still have exactly 2 entries.
+    let pts = client.get_data_points(&metric, &0, &u64::MAX, &0);
+    assert_eq!(
+        pts.len(),
+        2,
+        "StoreFull must not append a data point to the points list"
+    );
+
+    // Another rejected call with a different value must leave the state unchanged.
+    assert_eq!(
+        client.try_record_metric_at(&metric, &99, &4000),
+        Err(Ok(ContractError::StoreFull))
+    );
+    let summary_still = client.get_metric_summary(&metric);
+    assert_eq!(summary_still.total_count, 2);
+}
+
 #[test]
 fn test_legacy_methods() {
     let env = Env::default();

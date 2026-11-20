@@ -495,3 +495,131 @@ fn resolve_market_with_oracles_rejects_missing_oracle_result() {
         Err(Ok(ContractError::OracleResultNotAvailable))
     );
 }
+
+// ── TTL validation at initialization ────────────────────────────────────────
+
+/// Helper: register a fresh ResolutionContract and attempt to initialize it
+/// against a ledger whose `max_entry_ttl` is set to `max_ttl`.
+fn try_initialize_with_max_ttl(max_ttl: u32) -> Result<(), soroban_sdk::Error<ContractError>> {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Override the ledger's max_entry_ttl so env.storage().max_ttl() returns
+    // exactly `max_ttl` during the initialize call.
+    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 0,
+        protocol_version: 20,
+        sequence_number: 0,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 4096,
+        max_entry_ttl: max_ttl,
+    });
+
+    let resolution_id = env.register(ResolutionContract, ());
+    let resolution = ResolutionContractClient::new(&env, &resolution_id);
+    let admin = Address::generate(&env);
+    resolution.try_initialize(&admin)
+}
+
+/// When `max_ttl` equals or exceeds the larger of the two constants
+/// (`RESOLUTION_TTL_LEDGERS = 6_307_200`), initialization must succeed
+/// and no warning event is emitted.
+#[test]
+fn initialize_succeeds_when_max_ttl_is_sufficient() {
+    // 6_307_200 is the larger constant; use exactly that value.
+    assert_eq!(try_initialize_with_max_ttl(6_307_200), Ok(()));
+}
+
+/// When `max_ttl` is set below `COOLDOWN_TTL_LEDGERS` (535_680) both
+/// constants exceed the limit.  `initialize` must return
+/// `TtlExceedsNetworkMax` and emit warning events for both constants.
+#[test]
+fn initialize_fails_and_emits_events_when_both_ttls_exceed_max() {
+    // A testnet-like cap that is smaller than COOLDOWN_TTL_LEDGERS (535_680).
+    let low_max_ttl: u32 = 100_000;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 0,
+        protocol_version: 20,
+        sequence_number: 0,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 4096,
+        max_entry_ttl: low_max_ttl,
+    });
+
+    let resolution_id = env.register(ResolutionContract, ());
+    let resolution = ResolutionContractClient::new(&env, &resolution_id);
+    let admin = Address::generate(&env);
+
+    let result = resolution.try_initialize(&admin);
+    assert_eq!(result, Err(Ok(ContractError::TtlExceedsNetworkMax)));
+
+    // Both warning events must have been emitted (one per exceeding constant).
+    let events = env.events().all();
+    assert!(
+        events.len() >= 2,
+        "expected at least 2 ttl_warn events, got {}",
+        events.len()
+    );
+}
+
+/// When `max_ttl` is between the two constants (above `COOLDOWN_TTL_LEDGERS`
+/// but below `RESOLUTION_TTL_LEDGERS`), only `resolution_ttl` exceeds the cap.
+/// `initialize` must still return `TtlExceedsNetworkMax`.
+#[test]
+fn initialize_fails_when_only_resolution_ttl_exceeds_max() {
+    // Above COOLDOWN_TTL_LEDGERS (535_680) but below RESOLUTION_TTL_LEDGERS (6_307_200).
+    let mid_max_ttl: u32 = 1_000_000;
+    assert_eq!(
+        try_initialize_with_max_ttl(mid_max_ttl),
+        Err(Ok(ContractError::TtlExceedsNetworkMax))
+    );
+}
+
+/// A second `initialize` call on an already-initialized contract returns
+/// `InvalidState`, not `TtlExceedsNetworkMax`, regardless of the max_ttl.
+/// This confirms the duplicate-initialization guard fires before the TTL check.
+#[test]
+fn second_initialize_returns_invalid_state_not_ttl_error() {
+    // Use a sufficient max_ttl so the first initialize succeeds.
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 0,
+        protocol_version: 20,
+        sequence_number: 0,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 4096,
+        max_entry_ttl: 6_307_200,
+    });
+
+    let resolution_id = env.register(ResolutionContract, ());
+    let resolution = ResolutionContractClient::new(&env, &resolution_id);
+    let admin = Address::generate(&env);
+
+    resolution.initialize(&admin);
+
+    // Second attempt: even with a low cap, InvalidState fires first.
+    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 0,
+        protocol_version: 20,
+        sequence_number: 0,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 4096,
+        max_entry_ttl: 1,
+    });
+    assert_eq!(
+        resolution.try_initialize(&admin),
+        Err(Ok(ContractError::InvalidState))
+    );
+}

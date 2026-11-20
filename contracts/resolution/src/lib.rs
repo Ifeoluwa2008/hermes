@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, IntoVal, Map, Symbol, Vec,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, IntoVal,
+    Map, Symbol, Vec,
 };
 
 pub mod errors;
@@ -36,6 +37,47 @@ pub struct ResolutionStatus {
 pub struct ResolutionContract;
 
 impl ResolutionContract {
+    /// Checks both TTL constants against the network's `max_ttl` at initialize time.
+    ///
+    /// When a constant exceeds `max_ttl` the Soroban host would silently clamp the
+    /// actual TTL, causing earlier-than-expected expiry without any observable signal.
+    /// This helper makes the mismatch explicit: it returns
+    /// `Err(ContractError::TtlExceedsNetworkMax)` so callers can decide whether to
+    /// abort initialization or accept the clamped values.  An event is also emitted so
+    /// off-chain monitors can detect the condition in historical ledger data.
+    ///
+    /// The event schema is:
+    ///   topics:  [`"ttl_warn"`, `"<constant_name>"`]
+    ///   data:    `(desired: u32, effective: u32)`
+    fn validate_ttl_config(env: &Env) -> Result<(), ContractError> {
+        let max = env.storage().max_ttl();
+        let mut exceeded = false;
+
+        if COOLDOWN_TTL_LEDGERS > max {
+            let effective = max;
+            env.events().publish(
+                (symbol_short!("ttl_warn"), Symbol::new(env, "cooldown_ttl")),
+                (COOLDOWN_TTL_LEDGERS, effective),
+            );
+            exceeded = true;
+        }
+
+        if RESOLUTION_TTL_LEDGERS > max {
+            let effective = max;
+            env.events().publish(
+                (symbol_short!("ttl_warn"), Symbol::new(env, "resolution_ttl")),
+                (RESOLUTION_TTL_LEDGERS, effective),
+            );
+            exceeded = true;
+        }
+
+        if exceeded {
+            return Err(ContractError::TtlExceedsNetworkMax);
+        }
+
+        Ok(())
+    }
+
     fn extend_ttl(env: &Env, key: &DataKey, desired_ttl: u32) {
         let ttl = desired_ttl.min(env.storage().max_ttl());
         env.storage().persistent().extend_ttl(key, ttl, ttl);
@@ -94,6 +136,7 @@ impl ResolutionContract {
         if env.storage().persistent().has(&DataKey::Admin) {
             return Err(ContractError::InvalidState);
         }
+        Self::validate_ttl_config(&env)?;
         env.storage().persistent().set(&DataKey::Admin, &admin);
         Self::extend_ttl(&env, &DataKey::Admin, COOLDOWN_TTL_LEDGERS);
         Ok(())
