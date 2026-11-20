@@ -313,3 +313,185 @@ fn returns_correct_version() {
     let fixture = Fixture::new();
     assert_eq!(fixture.resolution().version(), 7);
 }
+
+// ── Oracle registry validation tests for resolve_market_with_oracles ────────
+
+/// A mock oracle that implements both `list_oracles` and `get_result`, matching
+/// the two entrypoints called by `resolve_market_with_oracles`.
+#[contract]
+struct MockRegistryOracle;
+
+#[contractimpl]
+impl MockRegistryOracle {
+    /// Store `result` for `market_id`.
+    pub fn set_result(env: Env, market_id: u32, result: Option<Vec<u32>>) {
+        env.storage().persistent().set(&market_id, &result);
+    }
+
+    /// Return the stored result for `market_id`.
+    pub fn get_result(env: Env, market_id: u32) -> Option<Vec<u32>> {
+        env.storage().persistent().get(&market_id)
+    }
+
+    /// Return the list of addresses stored as registered oracles.
+    pub fn list_oracles(env: Env) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&0u32)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Register an oracle address so `list_oracles` returns it.
+    pub fn register(env: Env, oracle: Address) {
+        let mut list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&0u32)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !list.contains(&oracle) {
+            list.push_back(oracle);
+        }
+        env.storage().persistent().set(&0u32, &list);
+    }
+}
+
+struct RegistryFixture {
+    env: Env,
+    resolver: Address,
+    admin: Address,
+    resolution_id: Address,
+    markets_id: Address,
+    /// Address of the mock registry oracle contract (plays the role of the oracles contract).
+    registry_oracle_id: Address,
+    /// A second oracle address registered inside the mock registry.
+    registered_oracle: Address,
+}
+
+impl RegistryFixture {
+    fn new() -> Self {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let resolver = Address::generate(&env);
+
+        let markets_id = env.register(MarketsContract, ());
+        let resolution_id = env.register(ResolutionContract, ());
+        // The registry oracle contract acts as the OracleContract stored in the
+        // resolution contract. Its `list_oracles` entrypoint is called to validate
+        // the oracle address, and its `get_result` entrypoint is called to fetch
+        // the market result.
+        let registry_oracle_id = env.register(MockRegistryOracle, ());
+
+        // Self-register so the fixture oracle address is in the registry.
+        let registry_client = MockRegistryOracleClient::new(&env, &registry_oracle_id);
+        registry_client.register(&registry_oracle_id);
+
+        let resolution = ResolutionContractClient::new(&env, &resolution_id);
+        resolution.initialize(&admin);
+        resolution.set_integrations(&admin, &markets_id, &registry_oracle_id);
+
+        let registered_oracle = registry_oracle_id.clone();
+
+        Self {
+            env,
+            resolver,
+            admin,
+            resolution_id,
+            markets_id,
+            registry_oracle_id,
+            registered_oracle,
+        }
+    }
+
+    fn resolution(&self) -> ResolutionContractClient<'_> {
+        ResolutionContractClient::new(&self.env, &self.resolution_id)
+    }
+
+    fn markets(&self) -> MarketsContractClient<'_> {
+        MarketsContractClient::new(&self.env, &self.markets_id)
+    }
+
+    fn create_market(&self) -> u32 {
+        let outcomes = Vec::from_array(
+            &self.env,
+            [
+                soroban_sdk::String::from_str(&self.env, "yes"),
+                soroban_sdk::String::from_str(&self.env, "no"),
+            ],
+        );
+        self.markets().create_market(
+            &self.resolver,
+            &soroban_sdk::String::from_str(&self.env, "Will it happen?"),
+            &soroban_sdk::String::from_str(&self.env, "Test market"),
+            &self.env.ledger().timestamp(),
+            &soroban_sdk::String::from_str(&self.env, "oracle"),
+            &outcomes,
+        )
+    }
+
+    fn set_result(&self, market_id: u32, result: Option<Vec<u32>>) {
+        MockRegistryOracleClient::new(&self.env, &self.registry_oracle_id)
+            .set_result(&market_id, &result);
+    }
+}
+
+/// A registered oracle address passes the registry check and resolves the market.
+#[test]
+fn resolve_market_with_oracles_accepts_registered_oracle() {
+    let fixture = RegistryFixture::new();
+    let market_id = fixture.create_market();
+    fixture.set_result(market_id, Some(Vec::from_array(&fixture.env, [0])));
+
+    let status = fixture.resolution().resolve_market_with_oracles(
+        &fixture.resolver,
+        &market_id,
+        &fixture.registered_oracle,
+    );
+
+    assert_eq!(status.market_id, market_id);
+    assert_eq!(
+        status.winning_outcomes,
+        Vec::from_array(&fixture.env, [0])
+    );
+    assert_eq!(status.oracle, fixture.registered_oracle);
+    assert_eq!(
+        fixture.markets().get_winning_outcomes(&market_id),
+        Some(Vec::from_array(&fixture.env, [0]))
+    );
+}
+
+/// An address that is NOT in the oracle registry is rejected with `OracleNotRegistered`.
+#[test]
+fn resolve_market_with_oracles_rejects_unregistered_oracle() {
+    let fixture = RegistryFixture::new();
+    let market_id = fixture.create_market();
+    fixture.set_result(market_id, Some(Vec::from_array(&fixture.env, [0])));
+
+    let fake_oracle = Address::generate(&fixture.env);
+
+    assert_eq!(
+        fixture.resolution().try_resolve_market_with_oracles(
+            &fixture.resolver,
+            &market_id,
+            &fake_oracle,
+        ),
+        Err(Ok(ContractError::OracleNotRegistered))
+    );
+}
+
+/// When the oracle is registered but returns no result, `OracleResultNotAvailable` is returned.
+#[test]
+fn resolve_market_with_oracles_rejects_missing_oracle_result() {
+    let fixture = RegistryFixture::new();
+    let market_id = fixture.create_market();
+    fixture.set_result(market_id, None);
+
+    assert_eq!(
+        fixture.resolution().try_resolve_market_with_oracles(
+            &fixture.resolver,
+            &market_id,
+            &fixture.registered_oracle,
+        ),
+        Err(Ok(ContractError::OracleResultNotAvailable))
+    );
+}
