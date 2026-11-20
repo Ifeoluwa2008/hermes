@@ -156,7 +156,7 @@ fn test_view_entrypoints_do_not_require_auth() {
     assert_eq!(pdata.publish_time, 1000);
 
     // Test is_oracle_healthy
-    assert!(client.is_oracle_healthy(&oracle_addr));
+    assert!(client.is_oracle_healthy(&oracle_addr, &feed));
 }
 
 // ---------------------------------------------------------------------------

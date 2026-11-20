@@ -396,7 +396,8 @@ fn snap_is_oracle_healthy_unregistered() {
     let unregistered = Address::generate(&f.env);
 
     let b = snap(&f.env);
-    let result = f.client().try_is_oracle_healthy(&unregistered);
+    let feed = String::from_str(&f.env, "BTC/USD");
+    let result = f.client().try_is_oracle_healthy(&unregistered, &feed);
     let (cpu, mem) = delta(b, snap(&f.env));
 
     assert_eq!(
@@ -420,7 +421,8 @@ fn snap_is_oracle_healthy_empty_registry() {
     let oracle = Address::generate(&f.env);
 
     let b = snap(&f.env);
-    let result = f.client().try_is_oracle_healthy(&oracle);
+    let feed = String::from_str(&f.env, "BTC/USD");
+    let result = f.client().try_is_oracle_healthy(&oracle, &feed);
     let (cpu, mem) = delta(b, snap(&f.env));
 
     assert_eq!(result, Err(Ok(Error::InvalidOracleConfig)));

@@ -210,7 +210,8 @@ fuzz_target!(|data: &[u8]| {
                     Address::generate(&env)
                 };
 
-                let _ = client.is_oracle_healthy(&oracle_addr);
+                let health_feed = SorobanString::from_str(&env, "BTC/USD");
+                let _ = client.is_oracle_healthy(&oracle_addr, &health_feed);
             }
             _ => unreachable!(),
         }
