@@ -41,6 +41,6 @@ fn test_ttl_bump_hot_read_paths() {
     assert!(res2.is_err(), "Expected error because price entrypoints are absent");
 
     // For is_oracle_healthy, it intercepts the error and returns false if the contract invocation fails
-    let is_healthy = client.is_oracle_healthy(&oracle);
+    let is_healthy = client.is_oracle_healthy(&oracle, &feed_id);
     assert_eq!(is_healthy, false);
 }
