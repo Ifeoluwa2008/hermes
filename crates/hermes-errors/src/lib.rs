@@ -24,6 +24,9 @@
 
 use std::collections::BTreeSet;
 
+/// Maximum allowed error code in the canonical registry.
+pub const MAX_ERROR_CODE: u32 = 9999;
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErrorDefinition {
     /// Numeric code (frozen once deployed)
@@ -40,6 +43,11 @@ pub struct ErrorDefinition {
 
 impl ErrorDefinition {
     pub fn new(code: u32, name: &'static str, description: &'static str) -> Self {
+        assert!(
+            code <= MAX_ERROR_CODE,
+            "error code {code} exceeds the maximum allowed value of {MAX_ERROR_CODE}"
+        );
+
         Self {
             code,
             name,
@@ -372,5 +380,14 @@ mod tests {
         assert!(find_by_code(412).is_some(), "monitor SubscriptionCapExceeded (412) must be defined");
         assert!(find_by_code(420).is_some(), "monitor Overflow (420) must be defined");
         assert!(find_by_code(421).is_some(), "monitor Underflow (421) must be defined");
+    }
+
+    #[test]
+    fn error_definition_rejects_codes_above_maximum() {
+        let result = std::panic::catch_unwind(|| {
+            ErrorDefinition::new(MAX_ERROR_CODE + 1, "OutOfRange", "Test error.")
+        });
+
+        assert!(result.is_err(), "codes above the maximum must be rejected");
     }
 }
