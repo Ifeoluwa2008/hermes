@@ -5,6 +5,7 @@
 //! # Entrypoints
 //!
 //! ## State-changing (require admin `require_auth`)
+//! - [`OraclesContract::initialize`] — configure the price staleness threshold
 //! - [`OraclesContract::add_oracle`] — register an oracle address
 //! - [`OraclesContract::remove_oracle`] — deregister an oracle address
 //!
@@ -14,7 +15,10 @@
 //! - [`OraclesContract::list_oracles`] — enumerate registered oracles
 //! - [`OraclesContract::get_price`] — fetch a raw price from an oracle
 //! - [`OraclesContract::get_price_data`] — fetch full price data from an oracle
-//! - [`OraclesContract::is_oracle_healthy`] — check if an oracle is live
+//! - [`OraclesContract::is_oracle_healthy`] — check liveness and price freshness
+//! - [`OraclesContract::check_oracle_health`] — check liveness and feed readiness
+//! - [`OraclesContract::submit_market_result`] — submit an authenticated market result
+//! - [`OraclesContract::get_result`] — return a unanimous submitted market result
 
 pub mod views;
 
@@ -28,6 +32,8 @@ use soroban_sdk::{
 /// Persistent storage key for the oracle address list.
 #[contracttype]
 pub enum DataKey {
+    /// Stores the address that initialized the contract.
+    Admin,
     /// Stores `Vec<Address>` — the ordered list of registered oracle addresses.
     OracleList,
     /// Stores a market outcome `String` for the `(market_id, oracle_address)` pair.
@@ -53,7 +59,7 @@ pub struct OraclePriceData {
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u32)]
 pub enum Error {
-    /// The requested oracle is not available or not responding.
+    /// The oracle is unavailable or does not advertise the required capability.
     OracleUnavailable = 200,
     /// The oracle address is not registered in the registry.
     InvalidOracleConfig = 201,
@@ -83,6 +89,8 @@ pub enum Error {
     OracleCallbackReplayDetected = 213,
     /// The oracle callback arrived after its deadline.
     OracleCallbackTimeout = 214,
+    /// The contract has already been initialized.
+    AlreadyInitialized = 215,
     // ===== CAPABILITIES ERRORS (220-229) =====
     /// The requested capability is not supported by this contract version.
     CapabilityNotSupported = 220,
@@ -96,6 +104,22 @@ pub enum Error {
 const REGISTRY_TTL_BUMP_THRESHOLD: u32 = 120_960;
 /// Extended TTL ledgers for the oracle registry key.
 const REGISTRY_TTL_BUMP_TO: u32 = 518_400;
+/// Maximum age in seconds for an oracle price publication.
+const MAX_PRICE_STALENESS_SECONDS: u64 = 3_600;
+
+fn same_outcomes(env: &Env, left: &Vec<u32>, right: &Vec<u32>) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut outcomes = Map::<u32, bool>::new(env);
+    for outcome in left.iter() {
+        outcomes.set(outcome, true);
+    }
+    if outcomes.len() != left.len() {
+        return false;
+    }
+    right.iter().all(|outcome| outcomes.contains_key(outcome))
+}
 
 /// One year of ledgers at an average ledger close time of five seconds.
 const MARKET_RESULT_TTL_LEDGERS: u32 = 6_307_200;
@@ -122,11 +146,25 @@ fn load_oracle_list(env: &Env) -> Vec<Address> {
         .unwrap_or_else(|| Vec::new(env))
 }
 
+fn max_price_staleness_seconds(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .extend_ttl(REGISTRY_TTL_BUMP_THRESHOLD, REGISTRY_TTL_BUMP_TO);
+    env.storage()
+        .instance()
+        .get(&DataKey::MaxPriceStalenessSeconds)
+        .unwrap_or(MAX_PRICE_STALENESS_SECONDS)
+}
+
+fn oracle_is_live(env: &Env, oracle: &Address) -> bool {
+    let live: Option<bool> =
+        env.invoke_contract(oracle, &symbol_short!("is_live"), soroban_sdk::vec![env]);
+    live.unwrap_or(false)
+}
+
 /// Persist the oracle list and bump the entry's TTL.
 fn save_oracle_list(env: &Env, list: &Vec<Address>) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::OracleList, list);
+    env.storage().persistent().set(&DataKey::OracleList, list);
     env.storage().persistent().extend_ttl(
         &DataKey::OracleList,
         REGISTRY_TTL_BUMP_THRESHOLD,
@@ -147,6 +185,26 @@ pub struct OraclesContract;
 
 #[contractimpl]
 impl OraclesContract {
+    /// Configure the maximum accepted price age.
+    ///
+    /// Requires `admin` authorization and can only be called once. Until
+    /// initialized, the contract uses the default one-hour threshold.
+    pub fn initialize(env: Env, admin: Address, max_staleness_seconds: u64) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPriceStalenessSeconds, &max_staleness_seconds);
+        env.storage()
+            .instance()
+            .extend_ttl(REGISTRY_TTL_BUMP_THRESHOLD, REGISTRY_TTL_BUMP_TO);
+        Ok(())
+    }
+
     /// Return a bitmap of features supported by this contract build.
     pub fn capabilities(_env: Env) -> u64 {
         views::capabilities()
@@ -196,15 +254,29 @@ impl OraclesContract {
 
     /// Register `oracle` in the registry.
     ///
-    /// Requires `admin` authorization.
-    pub fn add_oracle(env: Env, admin: Address, oracle: Address) {
+    /// Requires `admin` authorization and the oracle's `capabilities()` bitmap
+    /// to include `CapabilityFlag::GET_PRICE`.
+    pub fn add_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
         admin.require_auth();
+
+        let capabilities = env.try_invoke_contract::<u64, soroban_sdk::Error>(
+            &oracle,
+            &symbol_short!("capabilities"),
+            Vec::new(&env),
+        );
+        if !matches!(
+            capabilities,
+            Ok(Ok(caps)) if caps & CapabilityFlag::GET_PRICE != 0
+        ) {
+            return Err(Error::OracleUnavailable);
+        }
 
         let mut list = load_oracle_list(&env);
         if !list.contains(&oracle) {
             list.push_back(oracle);
         }
         save_oracle_list(&env, &list);
+        Ok(())
     }
 
     /// Remove `oracle` from the registry.
@@ -256,6 +328,12 @@ impl OraclesContract {
             soroban_sdk::vec![&env, feed_id.clone().into_val(&env)],
         );
         if let Some(data) = full {
+            let now = env.ledger().timestamp();
+            if now > data.publish_time
+                && now.saturating_sub(data.publish_time) > max_price_staleness_seconds(&env)
+            {
+                return Err(Error::OracleStale);
+            }
             return Ok(data);
         }
 
@@ -265,28 +343,108 @@ impl OraclesContract {
             soroban_sdk::vec![&env, feed_id.into_val(&env)],
         );
         match price {
-            Some(p) => Ok(OraclePriceData {
-                price: p,
-                publish_time: env.ledger().timestamp(),
-                confidence: None,
-                exponent: 0,
-            }),
+            Some(_) => Err(Error::OracleStale),
             None => Err(Error::OracleUnavailable),
         }
     }
 
-    /// Check whether a registered oracle reports itself as live.
-    pub fn is_oracle_healthy(env: Env, oracle: Address) -> Result<bool, Error> {
+    /// Check whether a registered oracle is live and returns fresh price data.
+    pub fn is_oracle_healthy(
+        env: Env,
+        oracle: Address,
+        feed_id: String,
+    ) -> Result<bool, Error> {
         let list = load_oracle_list(&env);
         if !list.contains(&oracle) {
             return Err(Error::InvalidOracleConfig);
         }
 
-        let live: Option<bool> = env.invoke_contract(
+        if !oracle_is_live(&env, &oracle) {
+            return Ok(false);
+        }
+
+        let price_data: Option<OraclePriceData> = env.invoke_contract(
             &oracle,
-            &symbol_short!("is_live"),
-            soroban_sdk::vec![&env],
+            &symbol_short!("get_pdata"),
+            soroban_sdk::vec![&env, feed_id.into_val(&env)],
         );
-        Ok(live.unwrap_or(false))
+        let Some(price_data) = price_data else {
+            return Ok(false);
+        };
+
+        let now = env.ledger().timestamp();
+        Ok(now.saturating_sub(price_data.publish_time) <= max_price_staleness_seconds(&env))
+    }
+
+    /// Check provider liveness and verify that a specific feed returns fresh, valid price data.
+    pub fn check_oracle_health(env: Env, oracle: Address, feed_id: String) -> Result<(), Error> {
+        let list = load_oracle_list(&env);
+        if !list.contains(&oracle) {
+            return Err(Error::InvalidOracleConfig);
+        }
+        if !oracle_is_live(&env, &oracle) {
+            return Err(Error::OracleUnavailable);
+        }
+
+        let price_data = Self::get_price_data(env, oracle, feed_id)?;
+        if price_data.price <= 0 {
+            return Err(Error::OracleUnavailable);
+        }
+
+        Ok(())
+    }
+
+    /// Submit a market result on behalf of a registered oracle.
+    ///
+    /// Each registered oracle has an independent submission. A provider may
+    /// update its own result until resolution; results are exposed only when
+    /// all submitted values agree.
+    pub fn submit_market_result(
+        env: Env,
+        oracle: Address,
+        market_id: u32,
+        winning_outcomes: Vec<u32>,
+    ) -> Result<(), Error> {
+        oracle.require_auth();
+        let oracle_list = load_oracle_list(&env);
+        if !oracle_list.contains(&oracle) {
+            return Err(Error::InvalidOracleConfig);
+        }
+
+        let key = DataKey::MarketResult(market_id, oracle);
+        env.storage().persistent().set(&key, &winning_outcomes);
+        env.storage().persistent().extend_ttl(
+            &key,
+            REGISTRY_TTL_BUMP_THRESHOLD.min(env.storage().max_ttl()),
+            REGISTRY_TTL_BUMP_TO.min(env.storage().max_ttl()),
+        );
+        Ok(())
+    }
+
+    /// Return the market result if all registered submissions agree.
+    pub fn get_result(env: Env, market_id: u32) -> Option<Vec<u32>> {
+        let oracle_list = load_oracle_list(&env);
+        let mut consensus: Option<Vec<u32>> = None;
+
+        for oracle in oracle_list.iter() {
+            let key = DataKey::MarketResult(market_id, oracle);
+            let result: Option<Vec<u32>> = env.storage().persistent().get(&key);
+            if let Some(result) = result {
+                env.storage().persistent().extend_ttl(
+                    &key,
+                    REGISTRY_TTL_BUMP_THRESHOLD.min(env.storage().max_ttl()),
+                    REGISTRY_TTL_BUMP_TO.min(env.storage().max_ttl()),
+                );
+                if let Some(existing) = consensus.as_ref() {
+                    if !same_outcomes(&env, existing, &result) {
+                        return None;
+                    }
+                } else {
+                    consensus = Some(result);
+                }
+            }
+        }
+
+        consensus
     }
 }

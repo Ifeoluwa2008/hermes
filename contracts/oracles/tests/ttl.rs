@@ -15,28 +15,26 @@ fn test_ttl_bump_hot_read_paths() {
     let client = OraclesContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
-    let oracle = Address::generate(&env);
-    client.add_oracle(&admin, &oracle);
+    let oracle = env.register(OracleWithoutPrice, ());
+    client.add_oracle(&admin, &oracle).unwrap();
 
     // list_oracles should succeed and bump TTL
     let oracles = client.list_oracles();
     assert_eq!(oracles.len(), 1);
     assert_eq!(oracles.get(0).unwrap(), oracle);
 
-    // To test get_price, get_price_data, and is_oracle_healthy, we would normally need the oracle 
-    // to be a deployed contract that implements the oracle interface.
-    // However, since we just added the TTL bump which happens *before* the cross-contract call,
-    // we can observe it fails with OracleUnavailable instead of panicking on the TTL bump.
+    // This contract advertises GET_PRICE but omits the price entrypoints, so
+    // the calls fail after exercising the registry TTL bump.
     let feed_id = String::from_str(&env, "BTC/USD");
     
     let res1 = client.try_get_price(&oracle, &feed_id);
-    assert!(res1.is_err(), "Expected error because oracle is a dummy address");
+    assert!(res1.is_err(), "Expected error because get_price is absent");
 
     let res2 = client.try_get_price_data(&oracle, &feed_id);
-    assert!(res2.is_err(), "Expected error because oracle is a dummy address");
+    assert!(res2.is_err(), "Expected error because price entrypoints are absent");
 
     // For is_oracle_healthy, it intercepts the error and returns false if the contract invocation fails
-    let is_healthy = client.is_oracle_healthy(&oracle);
+    let is_healthy = client.is_oracle_healthy(&oracle, &feed_id);
     assert_eq!(is_healthy, false);
 }
 
