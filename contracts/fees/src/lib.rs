@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, Map, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol};
 
 mod errors;
 pub use errors::ContractError;
@@ -82,6 +82,22 @@ pub struct FeeCollectionResult {
     pub remaining_balance: i128,
 }
 
+/// A pending fee configuration commit.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeCommitment {
+    pub commitment: BytesN<32>,
+    pub admin: Address,
+}
+
+/// A revealed fee configuration waiting for its timelock to expire.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedFeeUpdate {
+    pub config: FeeConfig,
+    pub apply_eta: u64,
+}
+
 // ============================================================
 // Storage keys
 // ============================================================
@@ -92,18 +108,8 @@ const COLLECTED_FEES_KEY: &str = "CollectedFees";
 const FEES_PAUSED_KEY: &str = "FeesPaused";
 const WITHDRAWAL_SCHEDULE_KEY: &str = "WithdrawalSchedule";
 const FEE_COMMIT_KEY: &str = "FeeCommit";
-const FEE_QUEUED_KEY: &str = "FeeQueued";
-
-#[contracttype]
-#[derive(Clone)]
-enum DataKey {
-    AuthorizedCallers,
-}
-
-/// Default timelock cooldown in seconds for fee updates (24 hours).
-const DEFAULT_TIMELOCK_SECONDS: u64 = 86_400;
-/// Minimum timelock cooldown in seconds for fee updates (1 hour).
-const MIN_TIMELOCK_SECONDS: u64 = 3_600;
+const FEE_QUEUED_UPDATE_KEY: &str = "FeeQueued";
+const FEE_UPDATE_TIMELOCK_SECONDS: u64 = 86_400;
 
 /// Maximum platform fee percentage in basis points (100% = 10_000).
 const MAX_FEE_PERCENTAGE: i128 = 10_000;
@@ -179,6 +185,103 @@ pub struct FeesContract;
 /// | `is_authorized_caller`     | Check fee-recording authorization        |
 #[contractimpl]
 impl FeesContract {
+    /// Commits a hash for a future fee configuration reveal.
+    pub fn commit_fee_config(env: Env, admin: Address, commitment: BytesN<32>) -> Result<(), ContractError> {
+        admin.require_auth();
+        Self::assert_is_admin(&env, &admin)?;
+
+        env.storage().persistent().set(
+            &Symbol::new(&env, FEE_COMMIT_KEY),
+            &FeeCommitment {
+                commitment,
+                admin: admin.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Reveals a fee configuration and queues it after verifying its committed hash.
+    pub fn reveal_fee_config(
+        env: Env,
+        admin: Address,
+        new_config: FeeConfig,
+    ) -> Result<FeeConfig, ContractError> {
+        admin.require_auth();
+        Self::assert_is_admin(&env, &admin)?;
+        Self::validate_fee_config(&new_config)?;
+
+        let pending: FeeCommitment = env
+            .storage()
+            .persistent()
+            .get(&Symbol::new(&env, FEE_COMMIT_KEY))
+            .ok_or(ContractError::NoPendingFeeCommit)?;
+
+        if pending.admin != admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let revealed_hash = Self::hash_fee_config(&env, &new_config);
+        if revealed_hash != pending.commitment {
+            return Err(ContractError::FeePreimageMismatch);
+        }
+
+        let apply_eta = env
+            .ledger()
+            .timestamp()
+            .checked_add(FEE_UPDATE_TIMELOCK_SECONDS)
+            .ok_or(ContractError::Overflow)?;
+        env.storage().persistent().set(
+            &Symbol::new(&env, FEE_QUEUED_UPDATE_KEY),
+            &QueuedFeeUpdate {
+                config: new_config.clone(),
+                apply_eta,
+            },
+        );
+        env.storage()
+            .persistent()
+            .remove(&Symbol::new(&env, FEE_COMMIT_KEY));
+
+        Ok(new_config)
+    }
+
+    /// Applies a revealed fee configuration after the timelock expires.
+    pub fn apply_fee_update(env: Env, admin: Address) -> Result<(), ContractError> {
+        admin.require_auth();
+        Self::assert_is_admin(&env, &admin)?;
+
+        let queued: QueuedFeeUpdate = env
+            .storage()
+            .persistent()
+            .get(&Symbol::new(&env, FEE_QUEUED_UPDATE_KEY))
+            .ok_or(ContractError::NoQueuedFeeUpdate)?;
+
+        if env.ledger().timestamp() < queued.apply_eta {
+            return Err(ContractError::FeeRevealTooEarly);
+        }
+
+        Self::validate_fee_config(&queued.config)?;
+        env.storage()
+            .persistent()
+            .set(&Symbol::new(&env, FEE_CONFIG_KEY), &queued.config);
+        env.storage()
+            .persistent()
+            .remove(&Symbol::new(&env, FEE_QUEUED_UPDATE_KEY));
+        Ok(())
+    }
+
+    /// Cancels a queued fee configuration update.
+    pub fn cancel_fee_update(env: Env, admin: Address) -> Result<(), ContractError> {
+        admin.require_auth();
+        Self::assert_is_admin(&env, &admin)?;
+
+        let key = Symbol::new(&env, FEE_QUEUED_UPDATE_KEY);
+        if !env.storage().persistent().has(&key) {
+            return Err(ContractError::NoQueuedFeeUpdate);
+        }
+        env.storage().persistent().remove(&key);
+        Ok(())
+    }
+
     // ========================================================
     // State-changing entrypoints
     // ========================================================
@@ -838,6 +941,20 @@ impl FeesContract {
             return Err(ContractError::InvalidInput);
         }
         Ok(())
+    }
+
+    fn hash_fee_config(env: &Env, config: &FeeConfig) -> BytesN<32> {
+        let mut encoded = Bytes::new(env);
+        encoded.append(&Bytes::from_slice(env, &config.platform_fee_percentage.to_be_bytes()));
+        encoded.append(&Bytes::from_slice(env, &config.creation_fee.to_be_bytes()));
+        encoded.append(&Bytes::from_slice(env, &config.min_fee_amount.to_be_bytes()));
+        encoded.append(&Bytes::from_slice(env, &config.max_fee_amount.to_be_bytes()));
+        encoded.append(&Bytes::from_slice(env, &config.collection_threshold.to_be_bytes()));
+        encoded.append(&Bytes::from_slice(
+            env,
+            &[if config.fees_enabled { 1u8 } else { 0u8 }],
+        ));
+        env.crypto().sha256(&encoded).into()
     }
 }
 
