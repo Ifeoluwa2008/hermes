@@ -45,3 +45,8 @@ The reporting contract has comprehensive auth boundary tests covering all entryp
 ```bash
 cargo test --test auth_boundary -- --nocapture
 ```
+
+## Handsoff notes
+
+<!-- handsoff-issue-429 -->
+- #429: [predictify-hybrid] events.rs is 139 KB - event catalog needs splitting by subsystem
