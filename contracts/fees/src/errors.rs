@@ -25,12 +25,14 @@ pub enum ContractError {
     BelowCollectionThreshold = 9,
     /// No fee configuration commit is pending.
     NoPendingFeeCommit = 10,
-    /// A revealed fee configuration does not match the committed hash.
-    FeePreimageMismatch = 11,
-    /// A queued fee update cannot be applied before its timelock expires.
-    FeeRevealTooEarly = 12,
-    /// No queued fee configuration update exists.
-    NoQueuedFeeUpdate = 13,
+    /// Fee config reveal was attempted before the timelock expired.
+    FeeRevealTooEarly = 11,
+    /// Fee config apply was attempted before the timelock expired.
+    FeeApplyTooEarly = 12,
+    /// The revealed fee config does not match the committed hash.
+    CommitHashMismatch = 13,
+    /// Fee withdrawal attempted before the cooldown period has elapsed.
+    WithdrawalCooldownActive = 14,
 }
 
 #[cfg(test)]

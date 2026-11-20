@@ -907,6 +907,20 @@ fn test_pending_fee_commit_inspection() {
 }
 
 #[test]
+fn test_update_fee_config_rejects_reveal_before_timelock() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let client = register_and_initialize(&env, &admin);
+    let hash = soroban_sdk::BytesN::from_array(&env, &[0x55u8; 32]);
+    client.commit_fee_config(&admin, &hash);
+
+    match client.try_update_fee_config(&admin, &default_fee_config()) {
+        Err(Ok(ContractError::FeeRevealTooEarly)) => {}
+        other => panic!("Expected FeeRevealTooEarly, got: {:?}", other),
+    }
+}
+
+#[test]
 fn test_pending_fee_config_inspection_and_apply() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -934,8 +948,8 @@ fn test_pending_fee_config_inspection_and_apply() {
     // Apply before timelock fails
     let early_res = client.try_apply_fee_update(&admin);
     match early_res {
-        Err(Ok(ContractError::FeeRevealTooEarly)) => {}
-        other => panic!("Expected FeeRevealTooEarly, got: {:?}", other),
+        Err(Ok(ContractError::FeeApplyTooEarly)) => {}
+        other => panic!("Expected FeeApplyTooEarly, got: {:?}", other),
     }
 
     // Fast-forward past timelock
