@@ -1,6 +1,6 @@
 //! Types and schemas for the Analytics contract.
 
-use soroban_sdk::{contracttype, Symbol};
+use soroban_sdk::contracttype;
 
 /// A single time-bucketed aggregation result for charting and time-series visualization.
 #[contracttype]

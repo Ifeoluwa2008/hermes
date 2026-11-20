@@ -22,7 +22,7 @@
 //! - An **optional range** (for code range validation in tests)
 //! - A **scope** (which contracts use this error)
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErrorDefinition {
