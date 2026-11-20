@@ -34,6 +34,7 @@ fn test_all_variants_accounted_for() {
         ContractError::FeePercentageTooHigh,
         ContractError::BelowCollectionThreshold,
         ContractError::NoPendingFeeCommit,
+        ContractError::FeePreimageMismatch,
         ContractError::FeeRevealTooEarly,
         ContractError::FeeApplyTooEarly,
     ];

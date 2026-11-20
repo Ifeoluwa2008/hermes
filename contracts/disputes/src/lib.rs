@@ -12,12 +12,22 @@ pub const DEFAULT_COUNCIL_THRESHOLD: u32 = 2;
 pub const DEFAULT_QUORUM: u32 = 10;
 pub const ESCALATION_STAKE_THRESHOLD: u32 = 1_000_000;
 
-/// Council vote abstention marker.
-pub const COUNCIL_VOTE_ABSTAIN: u32 = 0;
-/// Council vote to uphold the community resolution.
-pub const COUNCIL_VOTE_UPHOLD: u32 = 1;
-/// Council vote to overturn the community resolution.
-pub const COUNCIL_VOTE_OVERTURN: u32 = 2;
+/// A typed council member vote.
+///
+/// Replaces the former bare `u32` constants (`COUNCIL_VOTE_ABSTAIN`,
+/// `COUNCIL_VOTE_UPHOLD`, `COUNCIL_VOTE_OVERTURN`).  Using an enum makes
+/// out-of-range values impossible to construct and removes the need for the
+/// runtime range-check that was previously missing from `council_vote`.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CouncilVote {
+    /// The member abstains; the vote is recorded but does not affect tallies.
+    Abstain = 0,
+    /// The member votes to uphold the community resolution.
+    Uphold = 1,
+    /// The member votes to overturn the community resolution.
+    Overturn = 2,
+}
 
 /// Outcome of a community vote or council resolution.
 #[contracttype]
@@ -68,15 +78,44 @@ pub struct Dispute {
 
 /// Per-market configuration governing when a dispute may be escalated to the
 /// arbitration council.
+///
+/// Construct with [`EscalationPolicy::new`] to enforce invariants, or use
+/// [`DisputesContract::default_escalation_policy`] for the standard defaults.
+/// Direct struct construction is still possible for tests and trusted internal
+/// callers, but `new` validates inputs at the boundary.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EscalationPolicy {
     /// Minimum market stake (in stroops) required for escalation.
+    /// Must be greater than zero; set via `EscalationPolicy::new` or
+    /// `DisputesContract::default_escalation_policy`.
     pub min_stake: u32,
     /// Minimum community vote turnout required for a binding community vote.
     pub quorum: u32,
     /// Number of council members that must agree for a resolution to bind.
     pub council_threshold: u32,
+}
+
+impl EscalationPolicy {
+    /// Construct a validated `EscalationPolicy`.
+    ///
+    /// # Panics
+    /// - `min_stake` is zero (every stake would trivially qualify).
+    /// - `council_threshold` is zero (a threshold of zero allows resolution
+    ///   with no votes, which is meaningless).
+    pub fn new(min_stake: u32, quorum: u32, council_threshold: u32) -> Self {
+        if min_stake == 0 {
+            panic!("EscalationPolicy: min_stake must be greater than zero");
+        }
+        if council_threshold == 0 {
+            panic!("EscalationPolicy: council_threshold must be greater than zero");
+        }
+        Self {
+            min_stake,
+            quorum,
+            council_threshold,
+        }
+    }
 }
 
 /// Recorded state for an escalated dispute.
@@ -129,11 +168,30 @@ impl DisputesContract {
     }
 
     pub fn default_escalation_policy(_env: Env) -> EscalationPolicy {
-        EscalationPolicy {
-            min_stake: ESCALATION_STAKE_THRESHOLD,
-            quorum: DEFAULT_QUORUM,
-            council_threshold: DEFAULT_COUNCIL_THRESHOLD,
-        }
+        EscalationPolicy::new(
+            ESCALATION_STAKE_THRESHOLD,
+            DEFAULT_QUORUM,
+            DEFAULT_COUNCIL_THRESHOLD,
+        )
+    }
+
+    /// Construct a validated `EscalationPolicy` with a caller-supplied
+    /// `min_stake`.
+    ///
+    /// This is the runtime-configurable alternative to
+    /// `default_escalation_policy`. Use it when different markets require
+    /// different escalation thresholds.
+    ///
+    /// # Panics
+    /// - `min_stake` is zero.
+    /// - `council_threshold` is zero.
+    pub fn new_escalation_policy(
+        _env: Env,
+        min_stake: u32,
+        quorum: u32,
+        council_threshold: u32,
+    ) -> EscalationPolicy {
+        EscalationPolicy::new(min_stake, quorum, council_threshold)
     }
 
     pub fn is_escalation_eligible(
@@ -178,7 +236,7 @@ impl DisputesContract {
         policy: EscalationPolicy,
         record: EscalationRecord,
         voter: soroban_sdk::Address,
-        vote: u32,
+        vote: CouncilVote,
     ) -> EscalationRecord {
         let mut record: EscalationRecord = env
             .storage()
@@ -196,14 +254,13 @@ impl DisputesContract {
             panic!("council member has already voted");
         }
         match vote {
-            COUNCIL_VOTE_ABSTAIN => {}
-            COUNCIL_VOTE_UPHOLD => {
+            CouncilVote::Abstain => {}
+            CouncilVote::Uphold => {
                 record.uphold_votes += 1;
             }
-            COUNCIL_VOTE_OVERTURN => {
+            CouncilVote::Overturn => {
                 record.overturn_votes += 1;
             }
-            _ => panic!("invalid council vote"),
         }
         record.council_voters.push_back(voter);
         record.council_votes += 1;

@@ -9,10 +9,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-arbitrary = { version = "1.3", features = ["derive"] }
 fees = { path = ".." }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [[bin]]
-name = "collect_fees"
-path = "targets/collect_fees.rs"
+name = "main"
+path = "targets/main.rs"
