@@ -18,6 +18,7 @@ the default threshold of 3,600 seconds.
 EmptyRegistry
    │
    ├── add_oracle(admin, oracle)
+   │      ├── requires `capabilities()` to include `CapabilityFlag::GET_PRICE`
    │      └── push_back → NonEmptyRegistry
    │
    ├── remove_oracle(admin, oracle)
