@@ -45,3 +45,8 @@ The reporting contract has comprehensive auth boundary tests covering all entryp
 ```bash
 cargo test --test auth_boundary -- --nocapture
 ```
+
+## Handsoff notes
+
+<!-- handsoff-issue-430 -->
+- #430: [predictify-hybrid] markets.rs is 167 KB - market lifecycle, pricing, and LP logic should be separate modules
