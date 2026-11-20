@@ -36,6 +36,9 @@ pub enum ContractError {
     InvalidWinningOutcomes = 11,
     /// Oracle not registered; thrown when the supplied oracle address is not in the oracle registry.
     OracleNotRegistered = 12,
+    /// TTL exceeds network max; thrown at initialization when a TTL constant exceeds the
+    /// network's `max_ttl`, which would cause the Soroban host to silently clamp it.
+    TtlExceedsNetworkMax = 13,
 }
 
 #[cfg(test)]
@@ -57,5 +60,6 @@ mod tests {
         assert_eq!(ContractError::OracleResultNotAvailable as u32, 10);
         assert_eq!(ContractError::InvalidWinningOutcomes as u32, 11);
         assert_eq!(ContractError::OracleNotRegistered as u32, 12);
+        assert_eq!(ContractError::TtlExceedsNetworkMax as u32, 13);
     }
 }

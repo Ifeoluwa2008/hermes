@@ -15,6 +15,7 @@ fn test_error_discriminant_stability() {
     assert_eq!(ContractError::OracleResultNotAvailable as u32, 10);
     assert_eq!(ContractError::InvalidWinningOutcomes as u32, 11);
     assert_eq!(ContractError::OracleNotRegistered as u32, 12);
+    assert_eq!(ContractError::TtlExceedsNetworkMax as u32, 13);
 }
 
 #[test]
@@ -81,6 +82,7 @@ fn test_all_error_variants_distinct() {
         ContractError::OracleResultNotAvailable,
         ContractError::InvalidWinningOutcomes,
         ContractError::OracleNotRegistered,
+        ContractError::TtlExceedsNetworkMax,
     ];
     
     let discriminants: Vec<u32> = errors.iter().map(|e| *e as u32).collect();
