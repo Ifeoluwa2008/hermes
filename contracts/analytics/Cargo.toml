@@ -2,12 +2,17 @@
 name = "analytics"
 version = "0.1.0"
 edition = "2021"
+autotests = false
 
 [lib]
-crate-type = ["lib", "cdylib"]
+crate-type = ["lib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+
+[build-dependencies]
+hermes-codegen = { path = "../../crates/hermes-codegen" }
+hermes-errors = { path = "../../crates/hermes-errors" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

@@ -331,12 +331,21 @@ impl Analytics {
     }
 
     pub fn percentile(_env: Env, values: Vec<u64>, pct: u32) -> u64 {
-        if values.is_empty() {
+        let len = values.len();
+        if len == 0 {
             return 0;
         }
         let mut sorted = values.clone();
-        sorted.sort();
-        let idx = ((pct as usize) * (sorted.len() - 1)) / 100;
+        for i in 1..len {
+            let key = sorted.get(i).unwrap();
+            let mut j = i;
+            while j > 0 && sorted.get(j - 1).unwrap() > key {
+                sorted.set(j, sorted.get(j - 1).unwrap());
+                j -= 1;
+            }
+            sorted.set(j, key);
+        }
+        let idx = (pct * (len - 1)) / 100;
         sorted.get(idx).unwrap_or(0)
     }
 
