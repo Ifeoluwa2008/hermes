@@ -7,6 +7,7 @@ resolver = "2"
 members = [
   "crates/hermes-errors",
   "crates/hermes-codegen",
+  "crates/hermes-events",
   "contracts/*",
   "contracts/predictify-hybrid/fuzz",
   "contracts/disputes/fuzz",
@@ -19,6 +20,7 @@ exclude = []
 soroban-sdk = "22.0.0"
 ethnum = "1.5.3"
 criterion = "0.5"
+serde_json = "1"
 
 [profile.release]
 opt-level = "z"
