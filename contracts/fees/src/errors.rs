@@ -25,9 +25,9 @@ pub enum ContractError {
     BelowCollectionThreshold = 9,
     /// No pending fee commit was found for reveal or apply.
     NoPendingFeeCommit = 10,
-    /// Fee config apply was attempted before the timelock expired.
+    /// Fee config reveal was attempted before the timelock expired.
     FeeRevealTooEarly = 11,
-    /// Fee config apply was attempted before the timelock delay elapsed.
+    /// Fee config apply was attempted before the timelock expired.
     FeeApplyTooEarly = 12,
 }
 

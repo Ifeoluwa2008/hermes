@@ -106,6 +106,10 @@ const DEFAULT_TIMELOCK_SECONDS: u64 = 86_400;
 /// Maximum platform fee percentage in basis points (100% = 10_000).
 const MAX_FEE_PERCENTAGE: i128 = 10_000;
 
+fn check_fee_timelock(env: &Env, committed_at: u64, window_seconds: u64) -> bool {
+    env.ledger().timestamp() < committed_at.saturating_add(window_seconds)
+}
+
 // ============================================================
 // Contract
 // ============================================================
@@ -285,6 +289,12 @@ impl FeesContract {
         // Ensure fees are not paused for config updates (consistency)
         Self::assert_fees_not_paused(&env)?;
 
+        if let Some(commit) = Self::get_pending_fee_commit_internal(&env) {
+            if check_fee_timelock(&env, commit.committed_at, DEFAULT_TIMELOCK_SECONDS) {
+                return Err(ContractError::FeeRevealTooEarly);
+            }
+        }
+
         let now = env.ledger().timestamp();
         let eta = now.saturating_add(DEFAULT_TIMELOCK_SECONDS);
 
@@ -320,9 +330,8 @@ impl FeesContract {
         let pending = Self::get_pending_fee_config_internal(&env)
             .ok_or(ContractError::NoPendingFeeCommit)?;
 
-        let now = env.ledger().timestamp();
-        if now < pending.apply_eta {
-            return Err(ContractError::FeeRevealTooEarly);
+        if check_fee_timelock(&env, pending.proposed_at, DEFAULT_TIMELOCK_SECONDS) {
+            return Err(ContractError::FeeApplyTooEarly);
         }
 
         env.storage()
@@ -789,5 +798,22 @@ impl FeesContract {
             return Err(ContractError::InvalidInput);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_fee_timelock;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn fee_timelock_is_checked_against_the_current_timestamp() {
+        let env = Env::default();
+        env.ledger().with_mut(|ledger| ledger.timestamp = 109);
+
+        assert!(check_fee_timelock(&env, 100, 10));
+
+        env.ledger().with_mut(|ledger| ledger.timestamp = 110);
+        assert!(!check_fee_timelock(&env, 100, 10));
     }
 }
