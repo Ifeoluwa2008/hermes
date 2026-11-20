@@ -43,6 +43,8 @@ name = "analytics"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "hermes-codegen",
+ "hermes-errors",
  "soroban-sdk",
 ]
 
@@ -848,6 +850,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fees-fuzz"
+version = "0.0.0"
+dependencies = [
+ "fees",
+ "libfuzzer-sys",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "ff"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1284,16 +1295,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monitor-fuzz"
-version = "0.0.0"
-dependencies = [
- "arbitrary",
- "libfuzzer-sys",
- "monitor",
- "soroban-sdk",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1692,6 +1693,7 @@ name = "resolution"
 version = "0.0.0"
 dependencies = [
  "markets",
+ "serde_json",
  "soroban-sdk",
 ]
 

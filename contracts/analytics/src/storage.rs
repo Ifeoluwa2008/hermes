@@ -1,6 +1,6 @@
 //! Storage keys and limits for the Analytics contract.
 
-use soroban_sdk::{contracttype, Address, Symbol};
+use soroban_sdk::{contracttype, Symbol};
 
 /// Default maximum number of data points stored per metric stream.
 pub const DEFAULT_MAX_CAPACITY: u32 = 10_000;
