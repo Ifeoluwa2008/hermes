@@ -56,7 +56,7 @@ pub struct OraclePriceData {
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u32)]
 pub enum Error {
-    /// The requested oracle is not available or not responding.
+    /// The oracle is unavailable or does not advertise the required capability.
     OracleUnavailable = 200,
     /// The oracle address is not registered in the registry.
     InvalidOracleConfig = 201,
@@ -168,15 +168,29 @@ impl OraclesContract {
 
     /// Register `oracle` in the registry.
     ///
-    /// Requires `admin` authorization.
-    pub fn add_oracle(env: Env, admin: Address, oracle: Address) {
+    /// Requires `admin` authorization and the oracle's `capabilities()` bitmap
+    /// to include `CapabilityFlag::GET_PRICE`.
+    pub fn add_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), Error> {
         admin.require_auth();
+
+        let capabilities = env.try_invoke_contract::<u64, soroban_sdk::Error>(
+            &oracle,
+            &symbol_short!("capabilities"),
+            Vec::new(&env),
+        );
+        if !matches!(
+            capabilities,
+            Ok(Ok(caps)) if caps & CapabilityFlag::GET_PRICE != 0
+        ) {
+            return Err(Error::OracleUnavailable);
+        }
 
         let mut list = load_oracle_list(&env);
         if !list.contains(&oracle) {
             list.push_back(oracle);
         }
         save_oracle_list(&env, &list);
+        Ok(())
     }
 
     /// Remove `oracle` from the registry.
