@@ -25,8 +25,8 @@ pub mod views;
 pub use views::CapabilityFlag;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal, Map,
-    String, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, IntoVal,
+    String, Symbol, Vec,
 };
 
 /// Persistent storage key for the oracle address list.
@@ -36,10 +36,8 @@ pub enum DataKey {
     Admin,
     /// Stores `Vec<Address>` — the ordered list of registered oracle addresses.
     OracleList,
-    /// Stores the maximum allowed age of an oracle price publication in seconds.
-    MaxPriceStalenessSeconds,
-    /// Stores a registered oracle's submitted winning outcome indices.
-    MarketResult(u32, Address),
+    /// Stores a market outcome `String` for the `(market_id, oracle_address)` pair.
+    MarketResult(Symbol, Address),
 }
 
 /// Price data returned by `get_price_data`.
@@ -123,6 +121,11 @@ fn same_outcomes(env: &Env, left: &Vec<u32>, right: &Vec<u32>) -> bool {
     right.iter().all(|outcome| outcomes.contains_key(outcome))
 }
 
+/// One year of ledgers at an average ledger close time of five seconds.
+const MARKET_RESULT_TTL_LEDGERS: u32 = 6_307_200;
+/// Renew market result entries when fewer than seven days remain.
+const MARKET_RESULT_TTL_BUMP_THRESHOLD: u32 = 120_960;
+
 /// Bump the TTL of the oracle list on hot storage access without writing data.
 fn bump_registry_ttl(env: &Env) {
     if env.storage().persistent().has(&DataKey::OracleList) {
@@ -169,6 +172,14 @@ fn save_oracle_list(env: &Env, list: &Vec<Address>) {
     );
 }
 
+fn bump_market_result_ttl(env: &Env, key: &DataKey) {
+    env.storage().persistent().extend_ttl(
+        key,
+        MARKET_RESULT_TTL_BUMP_THRESHOLD,
+        MARKET_RESULT_TTL_LEDGERS,
+    );
+}
+
 #[contract]
 pub struct OraclesContract;
 
@@ -207,6 +218,38 @@ impl OraclesContract {
     /// Return all registered oracle addresses and renew the registry TTL.
     pub fn list_oracles(env: Env) -> Vec<Address> {
         load_oracle_list(&env)
+    }
+
+    /// Store a market outcome for `oracle_address`.
+    ///
+    /// Requires authorization from `oracle_address`. The persistent result
+    /// entry is given a one-year TTL.
+    pub fn submit_market_result(
+        env: Env,
+        market_id: Symbol,
+        oracle_address: Address,
+        result: String,
+    ) {
+        oracle_address.require_auth();
+
+        let key = DataKey::MarketResult(market_id, oracle_address);
+        env.storage().persistent().set(&key, &result);
+        env.storage().persistent().extend_ttl(
+            &key,
+            MARKET_RESULT_TTL_LEDGERS,
+            MARKET_RESULT_TTL_LEDGERS,
+        );
+    }
+
+    /// Return a stored market outcome, renewing its TTL when fewer than seven
+    /// days remain.
+    pub fn get_result(env: Env, market_id: Symbol, oracle_address: Address) -> Option<String> {
+        let key = DataKey::MarketResult(market_id, oracle_address);
+        let result = env.storage().persistent().get(&key);
+        if result.is_some() {
+            bump_market_result_ttl(&env, &key);
+        }
+        result
     }
 
     /// Register `oracle` in the registry.
