@@ -360,4 +360,42 @@ proptest! {
             }
         }
     }
+
+    #[test]
+    fn batch_add_deduplicates_arbitrary_duplicate_addresses(
+        indices in prop::collection::vec(0usize..5, 0..=10),
+        duplicate_index in 0usize..5,
+    ) {
+        let ctx = Ctx::new(5);
+        let list_id = ctx.sym("duplicate_props");
+        ctx.client.create_allowlist(&ctx.admin, &list_id);
+
+        let mut input_indices = indices;
+        input_indices.push(duplicate_index);
+        input_indices.push(duplicate_index);
+
+        let mut expected_indices = std::vec::Vec::new();
+        let mut addresses = Vec::new(&ctx.env);
+        for index in &input_indices {
+            addresses.push_back(ctx.user(*index as u32));
+            if !expected_indices.contains(index) {
+                expected_indices.push(*index);
+            }
+        }
+
+        ctx.client.add_addresses(&ctx.admin, &list_id, &addresses);
+        let actual = ctx.client.get_allowlist(&list_id);
+        prop_assert_eq!(actual.len() as usize, expected_indices.len());
+        for (position, index) in expected_indices.iter().enumerate() {
+            prop_assert_eq!(actual.get(position as u32).unwrap(), ctx.user(*index as u32));
+        }
+
+        // Re-applying the same duplicate-containing batch must leave state unchanged.
+        ctx.client.add_addresses(&ctx.admin, &list_id, &addresses);
+        let actual = ctx.client.get_allowlist(&list_id);
+        prop_assert_eq!(actual.len() as usize, expected_indices.len());
+        for (position, index) in expected_indices.iter().enumerate() {
+            prop_assert_eq!(actual.get(position as u32).unwrap(), ctx.user(*index as u32));
+        }
+    }
 }
