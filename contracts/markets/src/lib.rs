@@ -16,6 +16,7 @@
 //! | `place_bet`                 | Bettor (any address)       |
 //! | `resolve_market`            | Market creator or Admin    |
 //! | `claim_winnings`            | Winner / Claimant (bettor) |
+//! | `claim_refund`              | Bettor on cancelled market |
 //! | `cancel_market`             | Market creator             |
 //! | `withdraw_funds`            | Market creator             |
 //! | `update_market_params`      | Market creator             |
@@ -100,6 +101,8 @@ pub enum DataKey {
     /// Written **before** any token transfer in `claim_winnings` to uphold the
     /// checks-effects-interactions pattern and prevent reentrancy double-claims.
     ClaimedBet(u32, Address),
+    /// Records that a cancelled-market bet has already been refunded.
+    RefundedBet(u32, Address),
     /// Fractional payout numerator carried forward per outcome.
     PayoutRemainder(u32, u32),
     /// Winning outcome indices recorded when a market is resolved.
@@ -547,6 +550,9 @@ impl MarketsContract {
             return (0, None);
         }
 
+        // Carry fractional stroops forward between claimants for the same outcome.
+        // Any remainder left after the last claimant remains attributable to that
+        // outcome and is retained until a later claim; it is never discarded.
         let key = DataKey::PayoutRemainder(market_id, outcome_index);
         let remainder: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         let numerator = match stake
@@ -871,6 +877,23 @@ impl MarketsContract {
             .persistent()
             .get(&DataKey::MarketLimit)
             .unwrap_or(DEFAULT_MAX_MARKET_COUNT)
+    }
+
+    fn assert_market_limit(env: &Env) {
+        let counter: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MarketCounter)
+            .unwrap_or(0u32);
+        let limit = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MarketLimit)
+            .unwrap_or(DEFAULT_MAX_MARKET_COUNT);
+
+        if counter >= limit {
+            panic_with_error!(env, ContractError::MarketLimitReached);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1330,6 +1353,56 @@ impl MarketsContract {
         env.storage()
             .persistent()
             .set(&DataKey::Market(market_id), &market);
+    }
+
+    /// Refunds the claimant's original bet after the market has been cancelled.
+    ///
+    /// The refund flag is written before the token transfer so a re-entrant
+    /// callback cannot claim the same bet twice.
+    pub fn claim_refund(env: Env, claimant: Address, market_id: u32) -> i128 {
+        Self::require_initialized(&env);
+        claimant.require_auth();
+
+        let market: MarketData =
+            match env.storage().persistent().get(&DataKey::Market(market_id)) {
+                Some(m) => m,
+                None => panic_with_error!(env, ContractError::MarketNotFound),
+            };
+        if !market.cancelled {
+            panic_with_error!(env, ContractError::InvalidState);
+        }
+
+        let bet: BetData =
+            match env.storage().persistent().get(&DataKey::Bet(market_id, claimant.clone())) {
+                Some(b) => b,
+                None => panic_with_error!(env, ContractError::InvalidState),
+            };
+
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::RefundedBet(market_id, claimant.clone()))
+        {
+            panic_with_error!(env, ContractError::AlreadyClaimed);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::RefundedBet(market_id, claimant.clone()), &true);
+
+        let token_address: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TokenAddress)
+            .unwrap_or_else(|| panic_with_error!(env, ContractError::InvalidState));
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &claimant,
+            &bet.amount,
+        );
+
+        bet.amount
     }
 
     /// Withdraws funds from a market.
