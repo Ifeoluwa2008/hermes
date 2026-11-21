@@ -76,7 +76,11 @@ cargo build                   # Regenerate contract files
 
 ## Code Ranges
 
-Each contract reserves a 100-code block:
+Error codes are limited to the range `0–9999`. `MAX_ERROR_CODE` is
+`9999`; `ErrorDefinition::new()` rejects values above this limit so that
+future additions cannot occupy an unbounded code space.
+
+The allocation strategy reserves each contract a 100-code block:
 
 | Contract   | Block    | Ranges                        |
 |------------|----------|-------------------------------|
