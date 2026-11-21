@@ -387,16 +387,35 @@ fn test_transfer_ownership_rejects_same_admin() {
 fn test_new_admin_can_manage_allowlists() {
     let (env, setup) = setup_test();
     let new_admin = Address::generate(&env);
+    let list_id = Symbol::new(&env, "existing_list");
+
+    setup
+        .client
+        .create_allowlist(&setup.admin, &list_id);
+    setup
+        .client
+        .add_address(&setup.admin, &list_id, &setup.user1);
 
     setup.client.transfer_ownership(&setup.admin, &new_admin);
 
-    let list_id = Symbol::new(&env, "new_list");
-    let result = setup.client.try_create_allowlist(&new_admin, &list_id);
-    assert!(result.is_ok());
+    let new_admin_result = setup
+        .client
+        .try_add_address(&new_admin, &list_id, &setup.user2);
+    assert_eq!(new_admin_result, Ok(Ok(())));
 
-    // Old admin should no longer be able to manage
-    let result2 = setup.client.try_create_allowlist(&setup.admin, &list_id);
-    assert!(result2.is_err());
+    let old_admin_result = setup
+        .client
+        .try_add_address(&setup.admin, &list_id, &setup.user3);
+    assert_eq!(
+        old_admin_result,
+        Ok(Err(AllowlistError::Unauthorized))
+    );
+
+    let all = setup.client.get_allowlist(&list_id);
+    assert_eq!(all.len(), 2);
+    assert!(setup.client.is_allowed(&list_id, &setup.user1));
+    assert!(setup.client.is_allowed(&list_id, &setup.user2));
+    assert!(!setup.client.is_allowed(&list_id, &setup.user3));
 }
 
 // ===== Version and utility tests =====
