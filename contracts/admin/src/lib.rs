@@ -22,6 +22,7 @@ pub enum ContractError {
     Unauthorized = 3,
     AdminActionTimelocked = 4,
     InvalidCooldown = 5,
+    InvalidNewOwner = 6,
 }
 
 const MIN_COOLDOWN_SECONDS: u64 = 60;
@@ -128,6 +129,31 @@ impl AdminContract {
         env.storage()
             .persistent()
             .set(&DataKey::AdminCooldownSeconds, &0u64);
+        Ok(())
+    }
+
+    /// Transfer administrative ownership to a new address.
+    pub fn transfer_ownership(
+        env: Env,
+        current_admin: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
+        current_admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::AdminNotSet)?;
+
+        if current_admin != stored_admin {
+            return Err(ContractError::Unauthorized);
+        }
+        if new_admin == current_admin {
+            return Err(ContractError::InvalidNewOwner);
+        }
+
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
         Ok(())
     }
 
