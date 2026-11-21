@@ -360,6 +360,9 @@ impl AllowlistContract {
     /// Remove all addresses from an allowlist.
     ///
     /// Emits an `alist_cleared` event with the count of removed addresses.
+    /// This event is authoritative: indexers must treat it as removing every
+    /// address from the allowlist at the event timestamp. Individual
+    /// `alist_addr_rem` events are not emitted for this operation.
     ///
     /// # Authorization
     /// The `admin` must authenticate via `require_auth()` and be the
