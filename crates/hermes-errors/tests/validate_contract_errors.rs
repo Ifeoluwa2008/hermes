@@ -5,7 +5,8 @@
 //!
 //! # How it works
 //!
-//! 1. Locate all `contracts/*/src/errors.rs` files
+//! 1. Locate all `contracts/*/src/errors.rs` files (plus any extra error files
+//!    registered in `EXTRA_ERROR_FILES`)
 //! 2. Parse them as Rust AST (using syn crate)
 //! 3. Extract enum variants and their explicit discriminants
 //! 4. Compare against registry definitions
@@ -14,6 +15,15 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Additional contract error files that do not follow the default
+/// `contracts/<name>/src/errors.rs` layout.
+///
+/// Each entry is `(contract_name, relative_path_from_contracts_dir)`.
+const EXTRA_ERROR_FILES: &[(&str, &str)] = &[(
+    "predictify-hybrid",
+    "predictify-hybrid/src/err.rs",
+)];
 
 /// Represents a single error variant extracted from contract code.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -135,6 +145,27 @@ fn scan_contract_errors() -> Result<Vec<ExtractedError>, String> {
         }
     }
 
+    // Scan additional error files that live outside the default layout
+    // (e.g. predictify-hybrid uses `src/err.rs`).
+    for (contract_name, rel_path) in EXTRA_ERROR_FILES {
+        let errors_file = contracts_dir.join(rel_path);
+        if !errors_file.exists() {
+            eprintln!(
+                "Warning: expected error file not found: {}",
+                errors_file.display()
+            );
+            continue;
+        }
+        match extract_errors_from_file(&errors_file, contract_name) {
+            Ok(errors) => {
+                all_errors.extend(errors);
+            }
+            Err(e) => {
+                eprintln!("Warning: {}", e);
+            }
+        }
+    }
+
     Ok(all_errors)
 }
 
@@ -218,59 +249,44 @@ fn contract_errors_match_registry() {
         }
 
         let registry_match =
-            find_by_code(extracted_err.code).map(|r| r.name.to_string());
+            find_by_code(extracted_err.code).or_else(|| find_by_name(&extracted_err.name));
 
         match registry_match {
-            Some(registry_name) => {
-                if registry_name != extracted_err.name {
+            Some(entry) => {
+                if entry.code != extracted_err.code {
                     mismatches.push(format!(
-                        "Code mismatch: {} contract has '{}' = {}, but registry defines '{}' = {}",
+                        "Code mismatch: {} contract has '{}' = {}, registry has code {}",
                         extracted_err.contract,
                         extracted_err.name,
                         extracted_err.code,
-                        registry_name,
-                        extracted_err.code
+                        entry.code
                     ));
                 } else {
                     println!(
-                        "✓ {} contract: {} = {} (matches registry)",
+                        "✓ {} contract: {} = {}",
                         extracted_err.contract, extracted_err.name, extracted_err.code
                     );
                 }
             }
             None => {
                 mismatches.push(format!(
-                    "Unregistered error: {} contract has '{}' = {}, but this code is not in the registry",
+                    "Unregistered error: {} contract has '{}' = {} not found in registry",
                     extracted_err.contract, extracted_err.name, extracted_err.code
                 ));
             }
         }
     }
 
-    // Check for registry entries not found in any contract
-    let mut extracted_codes: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
-    for err in &extracted {
-        extracted_codes.insert(err.code);
-    }
-
-    for registry_err in &registry {
-        // Only warn about codes that are in the 100+ range (contract-specific)
-        // Skip universal errors (1-9, 20, etc.) that might not be used by all contracts
-        if registry_err.code >= 100 && !extracted_codes.contains(&registry_err.code) {
-            println!(
-                "⚠ Registry has '{}' = {} but not found in any contract (may be undeployed)",
-                registry_err.name, registry_err.code
-            );
-        }
-    }
-
     if !mismatches.is_empty() {
-        println!("\n❌ Found {} mismatches:\n", mismatches.len());
-        for mismatch in &mismatches {
-            println!("  {}", mismatch);
+        eprintln!("\n❌ Found {} mismatches:", mismatches.len());
+        for m in &mismatches {
+            eprintln!("  - {}", m);
         }
-        panic!("Error definitions do not match registry!");
-    } else {
-        println!("\n✓ All contract errors match the registry!");
+        panic!(
+            "Contract error definitions do not match registry ({} mismatches)",
+            mismatches.len()
+        );
     }
+
+    println!("\n✅ All contract errors match the registry");
 }

@@ -48,5 +48,5 @@ cargo test --test auth_boundary -- --nocapture
 
 ## Handsoff notes
 
-<!-- handsoff-issue-429 -->
-- #429: [predictify-hybrid] events.rs is 139 KB - event catalog needs splitting by subsystem
+<!-- handsoff-issue-430 -->
+- #430: [predictify-hybrid] markets.rs is 167 KB - market lifecycle, pricing, and LP logic should be separate modules
