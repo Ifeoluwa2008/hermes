@@ -27,6 +27,7 @@ pub mod circuit_breaker;
 mod config;
 mod delegation;
 mod err;
+pub mod errors;
 mod force_resolve;
 mod event_archive;
 pub mod events;
@@ -181,9 +182,6 @@ mod admin_cooldown_tests;
 use admin::{AdminAnalyticsResult, AdminInitializer, AdminManager, AdminPermission, AdminRole};
 use crate::Error;
 // Backwards-compatible re-export for existing module paths.
-pub mod errors {
-    pub use crate::Error;
-}
 pub use crate::Error;
 // pub use queries::QueryManager;
 pub use audit_trail::{AuditAction, AuditRecord, AuditTrailHead, AuditTrailManager};
