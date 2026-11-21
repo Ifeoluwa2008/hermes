@@ -34,8 +34,26 @@ fn ownership_transfer_updates_admin_and_revokes_old_admin() {
     let function_name = Symbol::new(&env, "action");
 
     client.initialize(&old_admin);
-    client.transfer_ownership(&old_admin, &new_admin);
+    client.propose_ownership(&old_admin, &new_admin);
+    assert_eq!(client.admin(), Ok(old_admin.clone()));
+
+    let pending = client.pending_ownership().expect("proposal should be stored");
+    assert_eq!(pending.new_admin, new_admin);
+    assert_eq!(
+        pending.accept_after,
+        pending.proposed_at + admin::OWNERSHIP_TRANSFER_TIMELOCK_SECONDS
+    );
+
+    assert_eq!(
+        client.try_accept_ownership(&new_admin),
+        Err(Ok(ContractError::OwnershipTransferTimelocked))
+    );
+
+    env.ledger()
+        .with_mut(|ledger| ledger.timestamp = pending.accept_after);
+    client.accept_ownership(&new_admin);
     assert_eq!(client.admin(), Ok(new_admin.clone()));
+    assert!(client.pending_ownership().is_none());
 
     assert_eq!(
         client.try_set_admin_cooldown(&old_admin, &300),
@@ -61,7 +79,7 @@ fn ownership_transfer_rejects_self_transfer() {
 
     client.initialize(&admin);
     assert_eq!(
-        client.try_transfer_ownership(&admin, &admin),
+        client.try_propose_ownership(&admin, &admin),
         Err(Ok(ContractError::InvalidNewOwner))
     );
     assert_eq!(client.admin(), Ok(admin));

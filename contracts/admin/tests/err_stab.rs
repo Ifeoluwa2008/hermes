@@ -11,6 +11,8 @@ fn admin_error_discriminants_are_stable() {
         (ContractError::AdminActionTimelocked, 4u32),
         (ContractError::InvalidCooldown, 5u32),
         (ContractError::InvalidNewOwner, 6u32),
+        (ContractError::OwnershipTransferNotProposed, 7u32),
+        (ContractError::OwnershipTransferTimelocked, 8u32),
     ];
 
     for (error, expected) in errors {
@@ -31,6 +33,8 @@ fn admin_error_discriminants_are_unique() {
         ContractError::AdminActionTimelocked as u32,
         ContractError::InvalidCooldown as u32,
         ContractError::InvalidNewOwner as u32,
+        ContractError::OwnershipTransferNotProposed as u32,
+        ContractError::OwnershipTransferTimelocked as u32,
     ];
 
     for (index, code) in codes.iter().enumerate() {

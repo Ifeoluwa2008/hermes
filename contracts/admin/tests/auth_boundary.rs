@@ -67,8 +67,20 @@ fn transfer_ownership_rejects_unauthorized_caller() {
     let new_owner = Address::generate(&env);
 
     assert_eq!(
-        client.try_transfer_ownership(&stranger, &new_owner),
+        client.try_propose_ownership(&stranger, &new_owner),
         Err(Ok(ContractError::Unauthorized))
+    );
+}
+
+#[test]
+fn accept_ownership_rejects_unproposed_and_wrong_candidate() {
+    let env = Env::default();
+    let (client, _admin) = setup(&env);
+    let stranger = Address::generate(&env);
+
+    assert_eq!(
+        client.try_accept_ownership(&stranger),
+        Err(Ok(ContractError::OwnershipTransferNotProposed))
     );
 }
 
