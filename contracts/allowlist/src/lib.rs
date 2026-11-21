@@ -514,11 +514,29 @@ impl AllowlistContract {
     /// `allowlist_id`.
     ///
     /// # Errors
+    /// - [`AllowlistError::AllowlistExpired`] if the allowlist's storage entry
+    ///   expired while its ID remains registered.
     /// - [`AllowlistError::AllowlistNotFound`] if the allowlist does not exist.
     pub fn is_allowed(env: Env, allowlist_id: Symbol, address: Address) -> Result<bool, AllowlistError> {
         Self::bump_instance_ttl(&env);
-        let addrs = Self::load_allowlist(&env, &allowlist_id)?;
-        Ok(addrs.contains(&address))
+        let key = allowlist_storage_key(&env, &allowlist_id);
+        if let Some(addrs) = env.storage().persistent().get::<_, Vec<Address>>(&key) {
+            return Ok(addrs.contains(&address));
+        }
+
+        let is_registered = match env
+            .storage()
+            .persistent()
+            .get::<_, Vec<Symbol>>(&DataKey::AllowlistRegistry)
+        {
+            Some(allowlists) => allowlists.contains(&allowlist_id),
+            None => false,
+        };
+        if is_registered {
+            Err(AllowlistError::AllowlistExpired)
+        } else {
+            Err(AllowlistError::AllowlistNotFound)
+        }
     }
 
     /// Batch check whether each `address` in `addresses` is present in the

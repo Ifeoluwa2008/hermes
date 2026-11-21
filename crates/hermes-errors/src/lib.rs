@@ -172,6 +172,12 @@ pub fn all_errors() -> Vec<ErrorDefinition> {
             .with_range(1, 99),
         ErrorDefinition::new(9, "InvalidInput", "Invalid input parameters.")
             .with_range(1, 9),
+        ErrorDefinition::new(
+            11,
+            "AllowlistExpired",
+            "The allowlist's persistent storage entry has expired.",
+        )
+        .with_range(1, 99),
 
         // =====================================================================
         // ANALYTICS CONTRACT ERRORS (codes 100–199)

@@ -22,6 +22,7 @@ fn test_error_variant_stability() {
     assert_eq!(AllowlistError::AllowlistEmpty as u32, 8);
     assert_eq!(AllowlistError::InvalidInput as u32, 9);
     assert_eq!(AllowlistError::Overflow as u32, 10);
+    assert_eq!(AllowlistError::AllowlistExpired as u32, 11);
 }
 
 #[test]
@@ -37,13 +38,14 @@ fn test_debug_format_does_not_panic() {
     let _ = format!("{:?}", AllowlistError::AllowlistEmpty);
     let _ = format!("{:?}", AllowlistError::InvalidInput);
     let _ = format!("{:?}", AllowlistError::Overflow);
+    let _ = format!("{:?}", AllowlistError::AllowlistExpired);
 }
 
 #[test]
 fn test_error_count_and_ordering() {
     // Ensure we have all expected error variants and can iterate through them.
     // This test helps catch accidental deletions or reorderings.
-    let expected_count = 10;
+    let expected_count = 11;
     let errors = vec![
         AllowlistError::Unauthorized,
         AllowlistError::NotInitialized,
@@ -55,6 +57,7 @@ fn test_error_count_and_ordering() {
         AllowlistError::AllowlistEmpty,
         AllowlistError::InvalidInput,
         AllowlistError::Overflow,
+        AllowlistError::AllowlistExpired,
     ];
     assert_eq!(errors.len(), expected_count);
     

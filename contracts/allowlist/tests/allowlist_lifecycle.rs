@@ -342,6 +342,26 @@ fn test_delete_nonexistent_allowlist() {
     assert_eq!(result, Ok(Err(AllowlistError::AllowlistNotFound)));
 }
 
+#[test]
+fn test_is_allowed_distinguishes_expired_from_missing_allowlist() {
+    let (env, setup) = setup_test();
+    let list_id = Symbol::new(&env, "expired");
+    setup.client.create_allowlist(&setup.admin, &list_id);
+    setup.client.add_address(&setup.admin, &list_id, &setup.user1);
+
+    let storage_key = (Symbol::new(&env, "Allowlist"), list_id.clone());
+    env.as_contract(&setup.contract_id, || {
+        env.storage().persistent().remove(&storage_key);
+    });
+
+    let expired = setup.client.try_is_allowed(&list_id, &setup.user1);
+    assert_eq!(expired, Ok(Err(AllowlistError::AllowlistExpired)));
+
+    let unknown_id = Symbol::new(&env, "unknown");
+    let missing = setup.client.try_is_allowed(&unknown_id, &setup.user1);
+    assert_eq!(missing, Ok(Err(AllowlistError::AllowlistNotFound)));
+}
+
 // ===== Ownership transfer tests =====
 
 #[test]
