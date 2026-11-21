@@ -97,7 +97,10 @@ pub const RENEWAL_BUFFER_SECONDS: u64 = 7 * 24 * 60 * 60; // Can renew 7 days be
 #### is_allowlisted
 - **Behavior**: Check if address is in valid allowlist
 - **Auth**: Public read
-- **Returns**: `bool`
+- **Returns**: `Result<bool, AllowlistError>`; returns `Ok(false)` when the
+  address is absent, `AllowlistExpired` when the allowlist storage entry has
+  expired but its ID remains registered, and `AllowlistNotFound` when the ID is
+  absent or deleted.
 
 #### list_expiring_soon
 - **Behavior**: Return addresses expiring within N days (e.g., 14 days)
