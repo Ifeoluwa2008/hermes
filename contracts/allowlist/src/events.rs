@@ -15,6 +15,7 @@
 //! | `alist_deleted`  | An allowlist is deleted     |
 //! | `alist_owner_xf` | Ownership is transferred    |
 //! | `alist_init`     | Contract is initialized     |
+//! | `alist_batch_add` | Addresses are batch-added |
 
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
@@ -49,6 +50,21 @@ pub fn emit_allowlist_address_added(
         address,
     );
     env.events().publish(topics, env.ledger().timestamp());
+}
+
+/// Emit one event containing the full set of addresses added by a batch call.
+pub fn emit_allowlist_addresses_added(
+    env: &Env,
+    admin: &Address,
+    allowlist_id: &Symbol,
+    addresses: &Vec<Address>,
+) {
+    let topics = (
+        Symbol::new(env, "alist_batch_add"),
+        admin,
+        allowlist_id,
+    );
+    env.events().publish(topics, addresses);
 }
 
 /// Emit an `AllowlistAddressRemoved` event.

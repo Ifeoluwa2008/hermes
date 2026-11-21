@@ -302,15 +302,19 @@ impl AllowlistContract {
         Self::require_admin(&env, &admin)?;
 
         let mut addrs = Self::load_allowlist(&env, &allowlist_id)?;
+        let mut added = Vec::<Address>::new(&env);
 
         for addr in addresses.iter() {
             if !addrs.contains(&addr) {
                 addrs.push_back(addr.clone());
-                events::emit_allowlist_address_added(&env, &admin, &allowlist_id, &addr);
+                added.push_back(addr);
             }
         }
 
         Self::save_allowlist(&env, &allowlist_id, &addrs);
+        if added.len() > 0 {
+            events::emit_allowlist_addresses_added(&env, &admin, &allowlist_id, &added);
+        }
 
         Ok(())
     }
