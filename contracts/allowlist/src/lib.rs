@@ -51,12 +51,10 @@ use soroban_sdk::{
 
 /// Minimum remaining ledgers before an allowlist entry is bumped on read.
 const ALLOWLIST_TTL_THRESHOLD: u32 = 100_000;
-/// Extended TTL ledgers for allowlist entries.
-const ALLOWLIST_TTL_TO: u32 = 518_400;
 /// Minimum remaining ledgers before the contract instance TTL is bumped.
 const INSTANCE_TTL_THRESHOLD: u32 = 100_000;
-/// Extended TTL ledgers for the contract instance.
-const INSTANCE_TTL_TO: u32 = 518_400;
+/// Target TTL ledgers for contract persistent entries and instance storage.
+const CONTRACT_TTL_LEDGERS: u32 = 518_400;
 
 // ---------------------------------------------------------------------------
 // Storage keys
@@ -116,19 +114,19 @@ impl AllowlistContract {
         env.storage().persistent().set(&DataKey::Initialized, &true);
         env.storage()
             .persistent()
-            .extend_ttl(&DataKey::Initialized, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+            .extend_ttl(&DataKey::Initialized, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
 
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage()
             .persistent()
-            .extend_ttl(&DataKey::Admin, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+            .extend_ttl(&DataKey::Admin, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
 
         env.storage()
             .persistent()
             .set(&DataKey::AllowlistRegistry, &Vec::<Symbol>::new(&env));
         env.storage()
             .persistent()
-            .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+            .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
 
         // Keep instance storage synchronized for backward compatibility
         env.storage().instance().set(&DataKey::Initialized, &true);
@@ -187,7 +185,7 @@ impl AllowlistContract {
                 .set(&DataKey::AllowlistRegistry, &registry);
             env.storage()
                 .persistent()
-                .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+                .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
         }
 
         events::emit_allowlist_created(&env, &admin, &allowlist_id);
@@ -448,7 +446,7 @@ impl AllowlistContract {
             .set(&DataKey::AllowlistRegistry, &filtered);
         env.storage()
             .persistent()
-            .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+            .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
 
         events::emit_allowlist_deleted(&env, &admin, &allowlist_id, count);
 
@@ -486,7 +484,7 @@ impl AllowlistContract {
             .set(&DataKey::Admin, &new_admin);
         env.storage()
             .persistent()
-            .extend_ttl(&DataKey::Admin, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+            .extend_ttl(&DataKey::Admin, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
 
         env.storage()
             .instance()
@@ -585,7 +583,7 @@ impl AllowlistContract {
         if env.storage().persistent().has(&DataKey::AllowlistRegistry) {
             env.storage()
                 .persistent()
-                .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+                .extend_ttl(&DataKey::AllowlistRegistry, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
         }
         env.storage()
             .persistent()
@@ -602,7 +600,7 @@ impl AllowlistContract {
     fn bump_instance_ttl(env: &Env) {
         env.storage()
             .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_TO);
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
     }
 
     /// Check if the contract is initialized, extending TTL if stored in persistent storage.
@@ -610,7 +608,7 @@ impl AllowlistContract {
         if env.storage().persistent().has(&DataKey::Initialized) {
             env.storage()
                 .persistent()
-                .extend_ttl(&DataKey::Initialized, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+                .extend_ttl(&DataKey::Initialized, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
             true
         } else {
             env.storage().instance().has(&DataKey::Initialized)
@@ -622,7 +620,7 @@ impl AllowlistContract {
         if env.storage().persistent().has(&DataKey::Admin) {
             env.storage()
                 .persistent()
-                .extend_ttl(&DataKey::Admin, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+                .extend_ttl(&DataKey::Admin, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
             env.storage().persistent().get(&DataKey::Admin)
         } else {
             env.storage().instance().get(&DataKey::Admin)
@@ -665,6 +663,6 @@ impl AllowlistContract {
         // Extend TTL so the allowlist record does not expire prematurely.
         env.storage()
             .persistent()
-            .extend_ttl(&key, ALLOWLIST_TTL_THRESHOLD, ALLOWLIST_TTL_TO);
+            .extend_ttl(&key, ALLOWLIST_TTL_THRESHOLD, CONTRACT_TTL_LEDGERS);
     }
 }
