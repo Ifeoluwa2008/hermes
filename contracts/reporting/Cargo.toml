@@ -32,6 +32,10 @@ name = "auth_admin"
 path = "tests/auth_admin.rs"
 
 [[test]]
+name = "market_reports_index"
+path = "tests/market_reports_index.rs"
+
+[[test]]
 name = "pause_behavior"
 path = "tests/pause_behavior.rs"
 
