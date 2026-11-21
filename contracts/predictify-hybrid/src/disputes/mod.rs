@@ -7,6 +7,11 @@ use crate::types::{
 };
 use soroban_sdk::{symbol_short, token, Address, Env, Map, String, Symbol, Vec};
 
+pub mod council;
+pub mod escalation;
+pub mod events;
+pub mod lifecycle;
+
 pub const MIN_DISPUTE_STAKE: i128 = 10_000_000;
 pub const DISPUTE_PERIOD_SECS: u64 = 86400;
 

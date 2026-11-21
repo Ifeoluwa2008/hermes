@@ -103,7 +103,7 @@ mod rate_limiter;
 mod dispute_multisig;
 mod event_topic_catalog;
 mod storage_tier_audit;
-mod leaderboard;
+pub mod leaderboard;
 mod lists;
 mod capabilities;
 

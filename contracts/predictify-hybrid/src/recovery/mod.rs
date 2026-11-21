@@ -6,6 +6,9 @@ use crate::markets::MarketStateManager;
 use crate::types::{ClaimInfo, MarketState};
 use crate::Error;
 
+pub mod active;
+pub mod archive;
+
 const DEFAULT_UNCLAIMED_CLAIM_PERIOD_SECONDS: u64 = 90 * 24 * 60 * 60;
 const RECOVERY_TTL_LEDGERS: u32 = 365 * 17_280;
 const RECOVERY_LIFETIME_THRESHOLD: u32 = 31 * 17_280;
