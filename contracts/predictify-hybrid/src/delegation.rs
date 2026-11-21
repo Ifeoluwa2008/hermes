@@ -112,6 +112,8 @@ impl DelegationManager {
             return Err(Error::InvalidInput);
         }
 
+        Self::validate_no_cycle(env, delegator, delegatee)?;
+
         // If the delegator already has an active delegation, remove the old
         // one first so we don't double-count.
         if let Some(existing) = Self::get_delegation(env, delegator) {
@@ -144,6 +146,35 @@ impl DelegationManager {
         Self::add_delegated_power(env, delegatee, stake)?;
 
         Ok(())
+    }
+
+    /// Rejects self-delegation and chains that return to the delegator.
+    fn validate_no_cycle(
+        env: &Env,
+        delegator: &Address,
+        delegatee: &Address,
+    ) -> Result<(), Error> {
+        if delegator == delegatee {
+            return Err(Error::DelegationSelfDelegation);
+        }
+
+        let mut current = delegatee.clone();
+        for _ in 0..64 {
+            if current == *delegator {
+                return Err(Error::DelegationCircular);
+            }
+
+            let next = match Self::get_delegation(env, &current) {
+                Some(record) => record.delegatee,
+                None => return Ok(()),
+            };
+            if next == current {
+                return Err(Error::DelegationCircular);
+            }
+            current = next;
+        }
+
+        Err(Error::DelegationCircular)
     }
 
     /// Remove an active delegation, releasing the delegated voting power.
@@ -402,6 +433,22 @@ mod tests {
 
         let result = DelegationManager::set_delegate(&env, &delegator, &delegator, 50_000);
         assert_eq!(result, Err(Error::InvalidInput));
+    }
+
+    #[test]
+    fn test_set_delegate_rejects_circular_delegation() {
+        let env = setup_env();
+        let addr_a = Address::generate(&env);
+        let addr_b = Address::generate(&env);
+        let addr_c = Address::generate(&env);
+
+        DelegationManager::set_total_voting_power(&env, 1_000_000).unwrap();
+
+        DelegationManager::set_delegate(&env, &addr_a, &addr_b, 10_000).unwrap();
+        DelegationManager::set_delegate(&env, &addr_b, &addr_c, 10_000).unwrap();
+
+        let result = DelegationManager::set_delegate(&env, &addr_c, &addr_a, 10_000);
+        assert_eq!(result, Err(Error::DelegationCircular));
     }
 
     #[test]

@@ -103,17 +103,9 @@ mod tests {
         });
     }
 
-    /// Test: Three-step circular delegation is NOT prevented
-    ///
-    /// Note: The current implementation only prevents direct circular delegation (A->B->A).
-    /// It does not prevent longer cycles like A->B->C->A. This is a documented limitation.
-    /// Preventing all cycles would require walking the full delegation graph, which is
-    /// expensive on Soroban storage. For now, we test that direct cycles are blocked.
+    /// Test: longer circular chains are prevented
     #[test]
     fn test_three_step_cycle_note() {
-        // This test documents that A->B->C->A is currently not prevented.
-        // This is a trade-off between security and gas efficiency.
-        // In practice, delegators should be cautious about creating delegation chains.
         let (env, addr_a, addr_b, addr_c, _) = setup();
 
         let contract_id = env.register(predictify_hybrid::PredictifyHybrid, ());
@@ -136,8 +128,14 @@ mod tests {
             );
             assert!(result.is_ok(), "B->C is allowed (not a direct cycle)");
 
-            // Note: C -> A would create a cycle A->B->C->A, but this is not prevented
-            // by the current implementation. This is documented as a limitation.
+            // C -> A would create A->B->C->A.
+            addr_c.require_auth();
+            let result = predictify_hybrid::PredictifyHybrid::delegate_votes(
+                env.clone(),
+                addr_c.clone(),
+                addr_a.clone(),
+            );
+            assert!(result.is_err(), "A->B->C->A should fail");
         });
     }
 
